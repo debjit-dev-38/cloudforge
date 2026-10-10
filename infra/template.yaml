@@ -17,12 +17,10 @@ Parameters:
   CognitoDomainPrefix:
     Type: String
     Description: Globally unique Cognito hosted-UI domain prefix
-
   AllowedOrigins:
     Type: CommaDelimitedList
-    Default: http://localhost:5173
+    Default: http://localhost:5173,https://cloudforge-dashboard.vercel.app
     Description: Explicit browser origins allowed to call the HTTP API
-
   UnsubscribeSecret:
     Type: String
     NoEcho: true
@@ -122,8 +120,10 @@ Resources:
         - COGNITO
       CallbackURLs:
         - http://localhost:5173/
+        - https://cloudforge-dashboard.vercel.app/
       LogoutURLs:
         - http://localhost:5173/
+        - https://cloudforge-dashboard.vercel.app/
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain

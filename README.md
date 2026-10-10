@@ -8,6 +8,8 @@ A deliberately small, multi-tenant transactional-email service. It is isolated f
 - `POST /v1/notifications`, authenticated with a per-project API key and optional idempotency key.
 - DynamoDB single-table persistence, tenant-scoped lookups, hashed API keys, template versions, delivery history, recipient opt-outs/suppression, and a per-project minute quota.
 - SQS + DLQ delivery pipeline, SES sender Lambda, and SES → SNS feedback processor for deliveries, bounces, and complaints.
+- Bulk campaigns for up to 1,000 normalized recipients, with queued worker processing and pause, resume, and cancel controls.
+- Email, SMS, and Firebase push delivery through one-channel-per-notification and one-channel-per-campaign payloads.
 - CloudWatch alarms for API errors and DLQ depth, plus an S3/CloudFront static dashboard shell.
 
 ## Deploy
@@ -45,6 +47,43 @@ curl -X POST "$API_URL/v1/notifications" \
   -d '{"template":"welcome","recipient":"person@example.com","data":{"name":"Sam"}}'
 ```
 
+### Campaigns
+
+The dashboard workflow is: create or select a published template, open **Campaigns**, choose one delivery channel, paste recipients separated by commas or new lines, review the deduplicated summary, and launch. Campaigns are asynchronous; use the list refresh or campaign detail view to follow progress and use pause, resume, or cancel for queued and running work. One campaign always uses one channel.
+
+```bash
+curl -X POST "$API_URL/v1/campaigns" \
+  -H "content-type: application/json" \
+  -H "x-api-key: nfy_your_key" \
+  -d '{"template":"welcome","channel":"email","recipients":["sam@example.com","lee@example.com"],"data":{"name":"Member"}}'
+```
+
+Email, SMS, and push campaign payloads use the same endpoint and differ only by their channel and recipient/content requirements:
+
+```json
+{"template":"otp","channel":"sms","recipients":["+14155552671"],"data":{"code":"123456"}}
+```
+
+```json
+{"template":"app-update","channel":"push","recipients":["person@example.com"],"data":{"version":"3.0"},"push":{"title":"Update available","body":"Install the latest version","deepLink":"https://app.example.com/update","data":{"source":"campaign"}}}
+```
+
+Each push campaign requires `push.title` and `push.body`; `push.deepLink` and `push.data` are optional. Email recipients are normalized as email addresses, SMS recipients as E.164 phone numbers, and push recipients as email identifiers associated with registered devices.
+
+### Device registration
+
+```bash
+curl -X POST "$API_URL/v1/devices" \
+  -H "content-type: application/json" \
+  -H "x-api-key: nfy_your_key" \
+  -d '{"recipient":"person@example.com","token":"fcm_token_from_client_sdk","platform":"android"}'
+
+curl -X DELETE "$API_URL/v1/devices" \
+  -H "content-type: application/json" \
+  -H "x-api-key: nfy_your_key" \
+  -d '{"recipient":"person@example.com","token":"fcm_token_from_client_sdk","platform":"android"}'
+```
+
 ## Local verification
 
 `pnpm test` runs dependency-free tests for template rendering, input validation, hashing, and status transitions. Lambda handlers use the AWS SDK v3 supplied by the managed Node.js Lambda runtime; use SAM or deployed AWS services for integration testing.
@@ -63,6 +102,8 @@ Push delivery uses `FCM_PROJECT_ID` and `FCM_SERVICE_ACCOUNT_JSON`. The service-
 
 Register devices with the API-key-authorized `POST /v1/devices` endpoint using `{ "recipient": "person@example.com", "token": "...", "platform": "ios" }`; remove them with `DELETE /v1/devices` using the same recipient and token. Push notifications use `channel: "push"` and a `push` object containing `title`, `body`, optional string-convertible `data`, and optional `deepLink`.
 
-## Intentional v1 boundaries
+## Provider configuration requirements
 
-There is no visual editor, campaigns, scheduled/bulk sending, custom customer domains, billing, multi-channel delivery, or advanced team roles. The dashboard is an operator shell rather than a polished product UI.
+Email requires a verified SES sender identity and, in the SES sandbox, verified recipient addresses. SMS requires Twilio account credentials and an E.164 sender number. Push requires an FCM project ID, a Firebase service-account JSON secret, and a registered device token. Keep provider credentials in Secrets Manager or an equivalent secret store; do not commit them, place them in ordinary configuration, or log them.
+
+Campaigns intentionally do not mix channels. Create separate campaigns when the same audience needs email, SMS, and push messages, because each channel has different recipient validation and provider delivery semantics.

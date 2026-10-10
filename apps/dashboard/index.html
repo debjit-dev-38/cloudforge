@@ -59,6 +59,11 @@
         <span>Send Notification</span>
       </div>
 
+      <div class="nav-item" data-page="devices" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        <span>Devices</span>
+      </div>
+
       <div class="sidebar-section-label" style="margin-top:12px;">Settings</div>
 
       <div class="nav-item" data-page="settings" role="button" tabindex="0">
@@ -234,6 +239,10 @@
             <button class="btn btn-secondary btn-sm" id="campaigns-refresh-btn" aria-label="Refresh campaigns">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
               Refresh
+            </button>
+            <button class="btn btn-primary btn-sm" id="campaign-create-btn" aria-label="Create new campaign">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Create Campaign
             </button>
           </div>
         </div>
@@ -475,14 +484,44 @@
         <div style="max-width:620px;">
           <div class="card">
             <div class="form-group">
-              <label class="form-label" for="send-recipient">Recipient Address / Target</label>
-              <input class="form-input text-mono" id="send-recipient" type="email" placeholder="verified-user@example.com" autocomplete="email" required>
-              <p class="form-hint">For SES sandbox testing, use an address verified in your AWS account.</p>
+              <label class="form-label" for="send-channel">Delivery Channel</label>
+              <select class="form-select" id="send-channel">
+                <option value="email" selected>Email (Amazon SES)</option>
+                <option value="sms">SMS (Twilio)</option>
+                <option value="push">Push (Firebase Cloud Messaging)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="send-recipient" id="send-recipient-label">Recipient Email Address</label>
+              <input class="form-input text-mono" id="send-recipient" type="text" placeholder="verified-user@example.com" required>
+              <p class="form-hint" id="send-recipient-hint">For SES sandbox testing, use an address verified in your AWS account.</p>
             </div>
             <div class="form-group">
               <label class="form-label" for="send-template">Template Slug</label>
               <input class="form-input text-mono" id="send-template" value="welcome" placeholder="welcome">
             </div>
+
+            <!-- Push-specific fields -->
+            <div id="send-push-fields" class="hidden" style="display:flex;flex-direction:column;gap:16px;margin-bottom:20px;padding:16px;background:var(--surface-raised);border-radius:var(--r-btn);border:1px solid var(--border);">
+              <span class="card-title" style="font-size:12px;">Push Notification Content</span>
+              <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="send-push-title">Push Title <span style="color:var(--error)">*</span></label>
+                <input class="form-input" id="send-push-title" placeholder="Notification Title">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="send-push-body">Push Body <span style="color:var(--error)">*</span></label>
+                <input class="form-input" id="send-push-body" placeholder="Notification body message...">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="send-push-deeplink">Deep Link (Optional)</label>
+                <input class="form-input text-mono" id="send-push-deeplink" placeholder="https://example.com/item/123">
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="send-push-data">Push Custom Data JSON (Optional)</label>
+                <textarea class="form-input form-textarea" id="send-push-data" style="min-height:80px;" placeholder='{"promoCode": "SUMMER26"}'></textarea>
+              </div>
+            </div>
+
             <div id="send-template-vars" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;"></div>
             <div class="divider"></div>
             <button class="btn btn-primary w-full" id="send-btn">
@@ -490,6 +529,65 @@
               Dispatch Notification
             </button>
             <div id="send-status" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Devices ─────────────────────────────────────────────── -->
+      <section class="page" id="page-devices" aria-labelledby="devices-heading">
+        <div class="section-header">
+          <div>
+            <h1 id="devices-heading" class="section-title">Device Registration</h1>
+            <p class="section-subtitle">Manage FCM client tokens associated with user recipients for mobile and web push.</p>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+          <!-- Register device card -->
+          <div class="card">
+            <div class="card-header"><span class="card-title">Register Device Token</span></div>
+            <div class="form-group">
+              <label class="form-label" for="dev-recipient">Recipient Identifier / User Email</label>
+              <input class="form-input text-mono" id="dev-recipient" placeholder="user@example.com" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="dev-token">FCM Registration Token</label>
+              <textarea class="form-input form-textarea" id="dev-token" style="min-height:80px;" placeholder="fcm_token_string_from_client_sdk..." required></textarea>
+              <p class="form-hint">Must be between 20 and 4096 characters.</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="dev-platform">Platform</label>
+              <select class="form-select" id="dev-platform">
+                <option value="ios">iOS (Apple APNs via FCM)</option>
+                <option value="android" selected>Android</option>
+                <option value="web">Web Push</option>
+              </select>
+            </div>
+            <div class="flex gap-12">
+              <button class="btn btn-primary" id="dev-register-btn" style="flex:1;">
+                Register Device
+              </button>
+              <button class="btn btn-danger" id="dev-remove-btn" style="flex:1;">
+                Remove Device
+              </button>
+            </div>
+            <div id="dev-status" class="mt-16"></div>
+          </div>
+
+          <!-- Registered devices list card -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Registered Devices</span>
+              <span class="text-sm text-muted" id="dev-count-label">0 devices</span>
+            </div>
+            <p class="text-sm text-muted" style="margin-bottom:14px;">
+              Devices registered via <code class="text-mono">POST /v1/devices</code>. Device tokens are masked for security.
+            </p>
+            <div id="dev-list" style="display:flex;flex-direction:column;gap:10px;">
+              <div class="state-empty" style="padding:24px 0;">
+                <p>No devices registered in this session.</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -600,6 +698,81 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" id="tpl-modal-cancel">Cancel</button>
       <button class="btn btn-primary" id="tpl-modal-submit">Create Template</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create Campaign modal -->
+<div class="modal-backdrop" id="campaign-modal" role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <span class="modal-title" id="campaign-modal-title">Create Bulk Campaign</span>
+      <button class="modal-close" id="campaign-modal-close" aria-label="Close modal">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group">
+          <label class="form-label" for="cmp-template">Template Slug <span style="color:var(--error)">*</span></label>
+          <input class="form-input text-mono" id="cmp-template" value="welcome" placeholder="welcome" required>
+          <p class="form-hint">Must be an existing published template.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="cmp-channel">Channel <span style="color:var(--error)">*</span></label>
+          <select class="form-select" id="cmp-channel">
+            <option value="email" selected>Email (Amazon SES)</option>
+            <option value="sms">SMS (Twilio)</option>
+            <option value="push">Push (Firebase Cloud Messaging)</option>
+          </select>
+          <p class="form-hint">Each campaign targets one specific channel.</p>
+        </div>
+      </div>
+
+      <!-- Push content fields for campaign -->
+      <div id="cmp-push-fields" class="hidden" style="display:flex;flex-direction:column;gap:14px;margin-bottom:18px;padding:16px;background:var(--surface-raised);border-radius:var(--r-btn);border:1px solid var(--border);">
+        <span class="card-title" style="font-size:12px;">Push Broadcast Payload</span>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label" for="cmp-push-title">Push Title <span style="color:var(--error)">*</span></label>
+          <input class="form-input" id="cmp-push-title" placeholder="Important announcement">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label" for="cmp-push-body">Push Body <span style="color:var(--error)">*</span></label>
+          <input class="form-input" id="cmp-push-body" placeholder="Message content for all recipients...">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label" for="cmp-push-deeplink">Deep Link (Optional)</label>
+          <input class="form-input text-mono" id="cmp-push-deeplink" placeholder="https://app.example.com/updates">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label" for="cmp-push-data">Push Custom Data JSON (Optional)</label>
+          <textarea class="form-input form-textarea" id="cmp-push-data" style="min-height:70px;" placeholder='{"campaignSource": "broadcast_v1"}'></textarea>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="cmp-recipients">Recipients List <span style="color:var(--error)">*</span></label>
+        <textarea class="form-input form-textarea" id="cmp-recipients" style="min-height:110px;" placeholder="alice@example.com&#10;bob@example.com&#10;carol@example.com, dave@example.com" required></textarea>
+        <p class="form-hint" id="cmp-recipients-hint">Enter up to 1,000 recipients. One per line or comma-separated. Deduplication is automatic.</p>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="cmp-data">Template Variables Data JSON <span style="color:var(--error)">*</span></label>
+        <textarea class="form-input form-textarea" id="cmp-data" style="min-height:90px;" placeholder='{"name": "Valued Customer", "offer": "20% off"}' required>{"name": "Valued Member"}</textarea>
+        <p class="form-hint">Shared variables JSON passed to template for rendering each notification.</p>
+      </div>
+
+      <!-- Confirmation / validation preview summary -->
+      <div id="cmp-summary" class="alert alert-info hidden" style="margin-bottom:0;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <div id="cmp-summary-content" style="font-size:13px;line-height:1.5;"></div>
+      </div>
+
+      <div id="cmp-error" class="form-error-msg" role="alert" aria-live="polite"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="cmp-modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="cmp-modal-submit">Create & Launch Campaign</button>
     </div>
   </div>
 </div>

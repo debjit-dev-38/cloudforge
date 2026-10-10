@@ -16,6 +16,15 @@
  *   POST /v1/notifications                                  (API key)
  */
 
+import {
+  buildCampaignPayload,
+  buildNotificationPayload,
+  buildPushPayload,
+  maskToken,
+  parseObjectJson,
+  validateRecipient,
+} from './form-utils.js';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Session / storage keys
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,6 +156,9 @@ let ntfAllItems = [...MOCK_DATA.notifications];
 
 // Campaigns raw data
 let campaignsData = [...MOCK_DATA.campaigns];
+let campaignPollTimer = null;
+let sessionDevices = [];
+let campaignSummaryReady = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tiny DOM helpers
@@ -222,6 +234,9 @@ const friendlyError = (err) => {
   if (err?.status === 401) return 'Session expired or not authenticated. Please log in.';
   if (/Published template not found/i.test(detail)) return 'Template not found or not published.';
   if (/valid email/i.test(detail)) return 'Enter a valid recipient email address.';
+  if (/suppressed|opted.?out/i.test(detail)) return 'One or more recipients are suppressed or opted out.';
+  if (/rate limit/i.test(detail)) return 'The project rate limit was reached. Try again shortly.';
+  if (/provider/i.test(detail)) return 'The delivery provider rejected the request. Check provider configuration.';
   if (/Missing template variable/i.test(detail)) return detail;
   if (/network|fetch|failed to fetch/i.test(String(err))) return 'Network error — check the API URL and your connection.';
   return detail;
@@ -729,7 +744,6 @@ async function loadCampaigns() {
   $('campaigns-auth-notice').classList.toggle('hidden', hasKey || isDemoMode);
 
   if (isDemoMode && !hasKey) {
-    campaignsData = [...MOCK_DATA.campaigns];
     renderCampaignsTable();
     return;
   }
@@ -831,12 +845,22 @@ async function handleCampaignAction(campaignId, action) {
   );
   if (!confirmed) return;
 
+  if (isDemoMode) {
+    const targetState = action === 'pause' ? 'paused' : action === 'resume' ? 'running' : 'cancelled';
+    const idx = campaignsData.findIndex(c => c.campaignId === campaignId);
+    if (idx !== -1) campaignsData[idx].state = targetState;
+    toast(`Campaign ${action}d (demo state updated).`, 'success');
+    renderCampaignsTable();
+    return;
+  }
+
   try {
     const result = await apiKeyRequest(`/v1/campaigns/${campaignId}/${action}`, 'POST');
     toast(`Campaign ${action}d successfully.`, 'success');
     const idx = campaignsData.findIndex(c => c.campaignId === campaignId);
     if (idx !== -1) campaignsData[idx].state = result.state;
     renderCampaignsTable();
+    await loadCampaigns();
   } catch (err) {
     toast(friendlyError(err), 'error');
   }
@@ -862,6 +886,10 @@ async function openCampaignDetail(campaignId) {
   try {
     const c = await apiKeyRequest(`/v1/campaigns/${campaignId}`);
     renderCampaignDetail(c);
+    if (['queued', 'running'].includes(c.state)) {
+      clearInterval(campaignPollTimer);
+      campaignPollTimer = setInterval(() => openCampaignDetail(campaignId), 10000);
+    }
   } catch (err) {
     $('campaign-detail-content').innerHTML = `<div class="state-empty"><h3>${escHtml(friendlyError(err))}</h3></div>`;
   }
@@ -961,6 +989,7 @@ async function handleDetailAction(campaignId, action) {
     const mIdx = MOCK_DATA.campaigns.findIndex(c => c.campaignId === campaignId);
     if (mIdx !== -1) MOCK_DATA.campaigns[mIdx].state = targetState;
     toast(`Campaign ${action}d (demo state updated).`, 'success');
+    renderCampaignsTable();
     await openCampaignDetail(campaignId);
     return;
   }
@@ -968,6 +997,7 @@ async function handleDetailAction(campaignId, action) {
   try {
     await apiKeyRequest(`/v1/campaigns/${campaignId}/${action}`, 'POST');
     toast(`Campaign ${action}d.`, 'success');
+    await loadCampaigns();
     await openCampaignDetail(campaignId);
   } catch (err) {
     toast(friendlyError(err), 'error');
@@ -1192,6 +1222,20 @@ async function createApiKey() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Page: Send Notification
 // ─────────────────────────────────────────────────────────────────────────────
+function updateSendChannel() {
+  const channel = $('send-channel').value;
+  const config = {
+    email: { label: 'Recipient Email Address', type: 'email', placeholder: 'verified-user@example.com', hint: 'For SES sandbox testing, use an address verified in your AWS account.' },
+    sms: { label: 'Recipient Phone Number', type: 'tel', placeholder: '+14155552671', hint: 'Use an E.164 number, for example +14155552671.' },
+    push: { label: 'Recipient User Email', type: 'email', placeholder: 'user@example.com', hint: 'The recipient must have a registered FCM device.' },
+  }[channel];
+  $('send-recipient-label').textContent = config.label;
+  $('send-recipient').type = config.type;
+  $('send-recipient').placeholder = config.placeholder;
+  $('send-recipient-hint').textContent = config.hint;
+  $('send-push-fields').classList.toggle('hidden', channel !== 'push');
+}
+
 function renderSendFormVars() {
   const container = $('send-template-vars');
   container.innerHTML = '';
@@ -1219,11 +1263,11 @@ function variablesFromSendTemplate() {
 
 async function sendNotification() {
   const apiKey = storedApiKey();
-  if (!apiKey) { toast('No API key in session. Create one in Project & API Keys.', 'error'); return; }
+  if (!apiKey && !isDemoMode) { toast('No API key in session. Create one in Project & API Keys.', 'error'); return; }
 
+  const channel = $('send-channel').value;
   const recipient = $('send-recipient').value.trim();
   const template  = $('send-template').value.trim();
-  if (!recipient) { toast('Enter a valid recipient address.', 'error'); return; }
   if (!template)  { toast('Enter a template slug.', 'error'); return; }
 
   const data = {};
@@ -1233,19 +1277,35 @@ async function sendNotification() {
     data[v] = val;
   }
 
+  let requestBody;
+  try {
+    const push = channel === 'push' ? buildPushPayload({
+      title: $('send-push-title').value,
+      body: $('send-push-body').value,
+      deepLink: $('send-push-deeplink').value,
+      data: parseObjectJson($('send-push-data').value, 'Push custom data'),
+    }) : undefined;
+    requestBody = buildNotificationPayload({ template, channel, recipient, data, push });
+  } catch (err) {
+    toast(err.message, 'error');
+    return;
+  }
+
   $('send-btn').disabled = true;
   $('send-status').innerHTML = '';
 
   try {
-    const result = await payload(await fetch(`${apiUrl()}/v1/notifications`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'idempotency-key': crypto.randomUUID(),
-      },
-      body: JSON.stringify({ template, recipient, data }),
-    }));
+    const result = isDemoMode
+      ? { notificationId: `ntf_demo_${Date.now()}` }
+      : await payload(await fetch(`${apiUrl()}/v1/notifications`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'idempotency-key': crypto.randomUUID(),
+        },
+        body: JSON.stringify(requestBody),
+      }));
     $('send-status').innerHTML = `
       <div class="alert alert-success" style="margin-top:16px;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1263,6 +1323,144 @@ async function sendNotification() {
   }
 }
 
+// Campaign creation and device registration use the same session API key as dispatch.
+function updateCampaignChannel() {
+  $('cmp-push-fields').classList.toggle('hidden', $('cmp-channel').value !== 'push');
+  campaignSummaryReady = false;
+  $('cmp-modal-submit').textContent = 'Review Campaign';
+}
+
+function closeCampaignModal() {
+  $('campaign-modal').classList.remove('open');
+  $('cmp-error').textContent = '';
+  $('cmp-summary').classList.add('hidden');
+  campaignSummaryReady = false;
+  $('cmp-modal-submit').textContent = 'Create & Launch Campaign';
+}
+
+function openCampaignModal() {
+  $('cmp-error').textContent = '';
+  $('cmp-summary').classList.add('hidden');
+  campaignSummaryReady = false;
+  $('cmp-modal-submit').textContent = 'Review Campaign';
+  updateCampaignChannel();
+  $('campaign-modal').classList.add('open');
+  $('cmp-template').focus();
+}
+
+function campaignFormPayload() {
+  const channel = $('cmp-channel').value;
+  const data = parseObjectJson($('cmp-data').value, 'Template variables data');
+  const push = channel === 'push' ? buildPushPayload({
+    title: $('cmp-push-title').value,
+    body: $('cmp-push-body').value,
+    deepLink: $('cmp-push-deeplink').value,
+    data: parseObjectJson($('cmp-push-data').value, 'Push custom data'),
+  }) : undefined;
+  return buildCampaignPayload({
+    template: $('cmp-template').value,
+    channel,
+    recipients: $('cmp-recipients').value,
+    data,
+    push,
+  });
+}
+
+function showCampaignSummary() {
+  try {
+    const body = campaignFormPayload();
+    $('cmp-summary-content').innerHTML = `<strong>Ready to launch</strong><br>${body.recipients.length.toLocaleString()} unique ${escHtml(body.channel)} recipients will receive <span class="text-mono">${escHtml(body.template)}</span>.`;
+    $('cmp-summary').classList.remove('hidden');
+    $('cmp-error').textContent = '';
+    return body;
+  } catch (err) {
+    $('cmp-summary').classList.add('hidden');
+    $('cmp-error').textContent = err.message;
+    return null;
+  }
+}
+
+async function submitCampaign() {
+  if (!campaignSummaryReady) {
+    if (showCampaignSummary()) {
+      campaignSummaryReady = true;
+      $('cmp-modal-submit').textContent = 'Confirm & Launch';
+    }
+    return;
+  }
+  const body = campaignFormPayload();
+  if (!storedApiKey() && !isDemoMode) { $('cmp-error').textContent = 'No API key in session. Create one in Project & API Keys.'; return; }
+  const button = $('cmp-modal-submit');
+  button.disabled = true;
+  button.textContent = 'Launching...';
+  try {
+    let result;
+    if (isDemoMode) {
+      const campaignId = `cmp_demo_${Date.now()}`;
+      const now = new Date().toISOString();
+      result = { campaignId, state: 'queued', total: body.recipients.length };
+      campaignsData.unshift({ campaignId, projectId: 'prj_ember_studio_demo', templateSlug: body.template, templateVersion: 1, channel: body.channel, state: result.state, total: result.total, processed: 0, successful: 0, failed: 0, pending: result.total, createdAt: now, updatedAt: now });
+    } else {
+      result = await apiKeyRequest('/v1/campaigns', 'POST', body);
+    }
+    closeCampaignModal();
+    toast(`Campaign ${result.campaignId} queued for ${result.total.toLocaleString()} recipients.`, 'success');
+    await loadCampaigns();
+  } catch (err) {
+    $('cmp-error').textContent = friendlyError(err);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Create & Launch Campaign';
+  }
+}
+
+function renderDevices() {
+  $('dev-count-label').textContent = `${sessionDevices.length} device${sessionDevices.length === 1 ? '' : 's'}`;
+  $('dev-list').innerHTML = sessionDevices.length ? sessionDevices.map(device => `
+    <div class="flex items-center" style="justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
+      <div><div class="text-mono">${escHtml(device.recipient)}</div><div class="text-sm text-muted">${escHtml(device.platform)} · ${escHtml(device.maskedToken)}</div></div>
+      <span class="badge badge-delivered">Registered</span>
+    </div>`).join('') : '<div class="state-empty" style="padding:24px 0;"><p>No devices registered in this session.</p></div>';
+}
+
+function validateDeviceForm() {
+  const recipient = validateRecipient('email', $('dev-recipient').value);
+  const token = $('dev-token').value.trim();
+  const platform = $('dev-platform').value;
+  if (token.length < 20 || token.length > 4096) throw new Error('Device token must be between 20 and 4096 characters.');
+  if (!['ios', 'android', 'web'].includes(platform)) throw new Error('Choose a valid device platform.');
+  return { recipient, token, platform };
+}
+
+async function registerDevice() {
+  try {
+    const device = validateDeviceForm();
+    if (!storedApiKey() && !isDemoMode) throw new Error('No API key in session. Create one in Project & API Keys.');
+    if (!isDemoMode) await apiKeyRequest('/v1/devices', 'POST', device);
+    sessionDevices = [{ recipient: device.recipient, platform: device.platform, maskedToken: maskToken(device.token) }, ...sessionDevices];
+    renderDevices();
+    $('dev-status').innerHTML = '<div class="alert alert-success"><span>Device registered successfully. The token is masked in this session.</span></div>';
+    $('dev-token').value = '';
+  } catch (err) {
+    $('dev-status').innerHTML = `<div class="alert alert-error"><span>${escHtml(friendlyError(err))}</span></div>`;
+  }
+}
+
+async function removeDevice() {
+  try {
+    const device = validateDeviceForm();
+    if (!storedApiKey() && !isDemoMode) throw new Error('No API key in session. Create one in Project & API Keys.');
+    if (!isDemoMode) await apiKeyRequest('/v1/devices', 'DELETE', device);
+    const maskedToken = maskToken(device.token);
+    sessionDevices = sessionDevices.filter(item => !(item.recipient === device.recipient && item.maskedToken === maskedToken));
+    renderDevices();
+    $('dev-status').innerHTML = '<div class="alert alert-success"><span>Device removed successfully.</span></div>';
+    $('dev-token').value = '';
+  } catch (err) {
+    $('dev-status').innerHTML = `<div class="alert alert-error"><span>${escHtml(friendlyError(err))}</span></div>`;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Page router
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1274,6 +1472,7 @@ function onPageLoad(pageId) {
     case 'templates':     renderTemplatesGrid(); break;
     case 'project':       updateAuthUi(); break;
     case 'send':          variablesFromSendTemplate(); break;
+    case 'devices':       renderDevices(); break;
     case 'settings':      updateAuthUi(); break;
   }
 }
@@ -1315,6 +1514,18 @@ $('overview-login-btn').addEventListener('click', () => {
 });
 
 $('campaigns-refresh-btn').addEventListener('click', loadCampaigns);
+$('campaign-create-btn').addEventListener('click', openCampaignModal);
+$('cmp-channel').addEventListener('change', updateCampaignChannel);
+$('campaign-modal').querySelectorAll('input, textarea, select').forEach(field => {
+  field.addEventListener('input', () => {
+    campaignSummaryReady = false;
+    $('cmp-modal-submit').textContent = 'Review Campaign';
+  });
+});
+$('cmp-modal-submit').addEventListener('click', submitCampaign);
+$('cmp-modal-cancel').addEventListener('click', closeCampaignModal);
+$('campaign-modal-close').addEventListener('click', closeCampaignModal);
+$('campaign-modal').addEventListener('click', (e) => { if (e.target === $('campaign-modal')) closeCampaignModal(); });
 $('campaigns-search').addEventListener('input', renderCampaignsTable);
 $('campaigns-filter-status').addEventListener('change', renderCampaignsTable);
 $('campaigns-filter-channel').addEventListener('change', renderCampaignsTable);
@@ -1345,7 +1556,11 @@ $('key-copy-btn').addEventListener('click', async () => {
 });
 
 $('send-btn').addEventListener('click', sendNotification);
+$('send-channel').addEventListener('change', updateSendChannel);
 $('send-template').addEventListener('change', variablesFromSendTemplate);
+
+$('dev-register-btn').addEventListener('click', registerDevice);
+$('dev-remove-btn').addEventListener('click', removeDevice);
 
 $('settings-login-btn').addEventListener('click', () => {
   loadOAuthConfig().then(triggerLogin).catch(err => toast(friendlyError(err), 'error'));
@@ -1391,6 +1606,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if ($('confirm-modal').classList.contains('open')) $('confirm-modal').classList.remove('open');
   if ($('template-modal').classList.contains('open')) closeTemplateModal();
+  if ($('campaign-modal').classList.contains('open')) closeCampaignModal();
 });
 
 $('api-url-input').addEventListener('change', () => {
@@ -1406,6 +1622,9 @@ $('api-url-input').addEventListener('change', () => {
   if (savedProjectId && $('proj-id-input')) $('proj-id-input').value = savedProjectId;
 
   renderSendFormVars();
+  updateSendChannel();
+  updateCampaignChannel();
+  renderDevices();
   updateAuthUi();
 
   try {
