@@ -1,0 +1,127 @@
+// Authenticated dashboard API Lambda handler.
+import { PutCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { apiKeyHash, decodeCursor, encodeCursor, errorResponse, json, newId, parseJson, requestId, templateVariables } from './core.js';
+import { get, getProjectMembership, key, listNotifications, revokeApiKey } from './store.js';
+
+const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const TableName = process.env.TABLE_NAME;
+const userId = (event) => event.requestContext?.authorizer?.jwt?.claims?.sub;
+
+async function authorizedProject(event, projectId) {
+  const project = await get(key.project(projectId), 'META');
+  if (!project) return undefined;
+  if (project.ownerUserId === userId(event)) return project;
+  const membership = await getProjectMembership(userId(event), project.organizationId);
+  return membership ? project : undefined;
+}
+
+export async function handler(event) {
+  const correlationId = requestId(event);
+  const respond = (statusCode, body) => json(statusCode, body, correlationId);
+  try {
+    const method = event.requestContext.http.method;
+    const path = event.rawPath;
+    const projectId = event.pathParameters?.projectId;
+    if (method === 'GET' && path === '/v1/dashboard-config') {
+      return respond(200, {
+        cognitoClientId: process.env.COGNITO_CLIENT_ID,
+        cognitoUserPoolId: process.env.COGNITO_USER_POOL_ID,
+        cognitoDomain: process.env.COGNITO_DOMAIN,
+      });
+    }
+    if (!userId(event)) return respond(401, { error: 'Authentication required', code: 'AUTHENTICATION_REQUIRED' });
+
+    if (method === 'POST' && path === '/v1/projects') {
+      const body = parseJson(event.body);
+      if (!body || typeof body.name !== 'string' || !body.name.trim()) return respond(400, { error: 'name is required', code: 'INVALID_REQUEST' });
+      const id = newId('prj');
+      const organizationId = newId('org');
+      const createdAt = new Date().toISOString();
+      await client.send(new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName,
+              Item: { PK: key.project(id), SK: 'META', projectId: id, organizationId, name: body.name.trim(), ownerUserId: userId(event), createdAt },
+              ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+            },
+          },
+          {
+            Put: {
+              TableName,
+              Item: { PK: key.user(userId(event)), SK: `MEMBERSHIP#${organizationId}`, userId: userId(event), organizationId, role: 'owner', createdAt },
+              ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+            },
+          },
+        ],
+      }));
+      return respond(201, { projectId: id, organizationId });
+    }
+    if (!projectId || !(await authorizedProject(event, projectId))) return respond(404, { error: 'Project not found', code: 'PROJECT_NOT_FOUND' });
+
+    if (method === 'POST' && path.endsWith('/api-keys')) {
+      const body = parseJson(event.body);
+      const raw = `nfy_${newId('key').replaceAll('-', '')}`;
+      const keyId = newId('key');
+      const hash = apiKeyHash(raw, process.env.API_KEY_PEPPER);
+      const project = await get(key.project(projectId), 'META');
+      const item = { hash, keyId, projectId, organizationId: project.organizationId, label: body?.label || 'default', createdAt: new Date().toISOString(), maxPerMinute: 60 };
+      await client.send(new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName,
+              Item: { PK: key.apiKey(hash), SK: 'META', ...item },
+              ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+            },
+          },
+          {
+            Put: {
+              TableName,
+              Item: { PK: key.project(projectId), SK: `APIKEY#${keyId}`, ...item },
+              ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+            },
+          },
+        ],
+      }));
+      return respond(201, { keyId, apiKey: raw, warning: 'Copy this value now; it cannot be retrieved again.' });
+    }
+    if (method === 'DELETE' && path.includes('/api-keys/')) {
+      const keyId = event.pathParameters?.apiKeyId;
+      const apiKey = await get(key.project(projectId), `APIKEY#${keyId}`);
+      if (!apiKey) return respond(404, { error: 'API key not found', code: 'API_KEY_NOT_FOUND' });
+      await revokeApiKey(apiKey.hash);
+      return respond(200, { keyId, revoked: true });
+    }
+    if (method === 'POST' && path.endsWith('/templates')) {
+      const body = parseJson(event.body);
+      if (!/^[a-z0-9-]+$/.test(body?.slug || '')) return respond(400, { error: 'slug must contain lowercase letters, digits, and hyphens', code: 'INVALID_REQUEST' });
+      if (![body.subject, body.html].every((value) => typeof value === 'string')) return respond(400, { error: 'subject and html are required', code: 'INVALID_REQUEST' });
+      const version = 1;
+      const template = { PK: key.project(projectId), SK: key.template(body.slug, version), projectId, slug: body.slug, version, state: body.state === 'published' ? 'published' : 'draft', subject: body.subject, html: body.html, text: body.text || '', variables: [...new Set([...templateVariables(body.subject), ...templateVariables(body.html), ...templateVariables(body.text || '')])], createdAt: new Date().toISOString() };
+      await client.send(new TransactWriteCommand({
+        TransactItems: [
+          { Put: { TableName, Item: template, ConditionExpression: 'attribute_not_exists(PK)' } },
+          { Put: { TableName, Item: { PK: key.project(projectId), SK: key.templateCurrent(body.slug), version, state: template.state }, ConditionExpression: 'attribute_not_exists(PK)' } },
+        ],
+      }));
+      return respond(201, { template });
+    }
+    if (method === 'GET' && path.endsWith('/notifications')) {
+      const limitValue = event.queryStringParameters?.limit;
+      const limit = limitValue === undefined ? 50 : Number(limitValue);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) return respond(400, { error: 'limit must be an integer between 1 and 100', code: 'INVALID_REQUEST' });
+      const cursor = decodeCursor(event.queryStringParameters?.cursor);
+      const result = await listNotifications(projectId, limit, cursor);
+      const body = { notifications: result.Items || [] };
+      if (result.LastEvaluatedKey) body.nextCursor = encodeCursor(result.LastEvaluatedKey);
+      return respond(200, body);
+    }
+    return respond(404, { error: 'Route not found', code: 'NOT_FOUND' });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'dashboard_api_error', requestId: correlationId, error: error.message, errorName: error.name }));
+    return errorResponse(error, correlationId);
+  }
+}

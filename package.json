@@ -1,0 +1,11 @@
+{
+  "name": "notification-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/unit/*.test.js",
+    "typecheck": "node --check apps/api/src/core.js && node --check apps/api/src/delivery.js && node --check apps/api/src/providers/ses-email-provider.js && node --check apps/api/src/providers/twilio-sms-provider.js && node --check apps/api/src/providers/fcm-push-provider.js && node --check apps/api/src/store.js && node --check apps/api/src/notification-api.js && node --check apps/api/src/campaign-api.js && node --check apps/api/src/device-api.js && node --check apps/api/src/dashboard-api.js && node --check apps/api/src/worker.js && node --check apps/api/src/feedback.js && node --check apps/api/src/unsubscribe.js && node --check tests/unit/core.test.js && node --check tests/unit/delivery.test.js && node --check tests/unit/notification-routing.test.js && node --check tests/unit/twilio-sms-provider.test.js && node --check tests/unit/fcm-push-provider.test.js && node --check tests/unit/campaign.test.js",
+    "lint": "node --check apps/api/src/core.js && node --check apps/api/src/delivery.js && node --check apps/api/src/providers/ses-email-provider.js && node --check apps/api/src/providers/twilio-sms-provider.js && node --check apps/api/src/providers/fcm-push-provider.js && node --check apps/api/src/store.js && node --check apps/api/src/notification-api.js && node --check apps/api/src/campaign-api.js && node --check apps/api/src/device-api.js && node --check apps/api/src/dashboard-api.js && node --check apps/api/src/worker.js && node --check apps/api/src/feedback.js && node --check apps/api/src/unsubscribe.js && node --check tests/unit/core.test.js && node --check tests/unit/delivery.test.js && node --check tests/unit/notification-routing.test.js && node --check tests/unit/twilio-sms-provider.test.js && node --check tests/unit/fcm-push-provider.test.js && node --check tests/unit/campaign.test.js"
+  }
+}

@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "notification-mvp"
+resolve_s3 = true
+s3_prefix = "notification-mvp"
+region = "ap-south-1"
+profile = "cloudforge"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "SendingEmail=\"deyricky4@gmail.com\" AllowedOrigins=\"http://localhost:5173\" CognitoDomainPrefix=\"notification-mvp-686511309884\""
+image_repositories = []
+
+[default.global.parameters]
+region = "ap-south-1"

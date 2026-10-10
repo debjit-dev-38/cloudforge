@@ -1,0 +1,479 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Transform: AWS::Serverless-2016-10-31
+
+Description: Small multi-tenant transactional email notification service
+
+Parameters:
+  SendingEmail:
+    Type: String
+    Description: Verified Amazon SES sender address
+
+  ApiKeyPepper:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+
+  CognitoDomainPrefix:
+    Type: String
+    Description: Globally unique Cognito hosted-UI domain prefix
+
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173
+    Description: Explicit browser origins allowed to call the HTTP API
+
+  UnsubscribeSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Secret used to sign recipient unsubscribe tokens
+
+  FcmProjectId:
+    Type: String
+    Default: ''
+    Description: Firebase project ID for push delivery
+
+  FcmServiceAccountJson:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Firebase service-account JSON, preferably supplied as a Secrets Manager dynamic reference
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 20
+    MemorySize: 256
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref NotificationTable
+        QUEUE_URL: !Ref DeliveryQueue
+        SENDING_EMAIL: !Ref SendingEmail
+        SES_CONFIGURATION_SET: !Ref SesConfigurationSet
+        API_KEY_PEPPER: !Ref ApiKeyPepper
+        UNSUBSCRIBE_SECRET: !Ref UnsubscribeSecret
+        FCM_PROJECT_ID: !Ref FcmProjectId
+        FCM_SERVICE_ACCOUNT_JSON: !Ref FcmServiceAccountJson
+        COGNITO_CLIENT_ID: !Ref UserPoolClient
+        COGNITO_USER_POOL_ID: !Ref UserPool
+        COGNITO_DOMAIN: !Sub https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
+
+Resources:
+  NotificationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  DeliveryDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  DeliveryQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 120
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeliveryDlq.Arn
+        maxReceiveCount: 3
+      SqsManagedSseEnabled: true
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: notification-mvp-users
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - http://localhost:5173/
+      LogoutURLs:
+        - http://localhost:5173/
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref UserPool
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: !Ref AllowedOrigins
+        AllowHeaders:
+          - authorization
+          - content-type
+          - x-api-key
+          - idempotency-key
+          - x-request-id
+        AllowMethods:
+          - GET
+          - POST
+          - DELETE
+          - OPTIONS
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              audience:
+                - !Ref UserPoolClient
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+
+  SendNotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../apps/api/
+      Handler: src/notification-api.handler
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:TransactWriteItems
+            Resource: !GetAtt NotificationTable.Arn
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DeliveryQueue.QueueName
+      Events:
+        Send:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/notifications
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  CampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../apps/api/
+      Handler: src/campaign-api.handler
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:Query
+              - dynamodb:TransactWriteItems
+            Resource: !GetAtt NotificationTable.Arn
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DeliveryQueue.QueueName
+      Events:
+        CampaignCollection:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/campaigns
+            Method: ANY
+            Auth:
+              Authorizer: NONE
+        CampaignItem:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/campaigns/{campaignId}"
+            Method: ANY
+            Auth:
+              Authorizer: NONE
+        CampaignAction:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/campaigns/{campaignId}/{action}"
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  DashboardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../apps/api/
+      Handler: src/dashboard-api.handler
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:Query
+              - dynamodb:TransactWriteItems
+            Resource: !GetAtt NotificationTable.Arn
+      Events:
+        CreateProject:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/projects
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+        DashboardConfig:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/dashboard-config
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+        CreateKey:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/projects/{projectId}/api-keys"
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+        RevokeKey:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/projects/{projectId}/api-keys/{apiKeyId}"
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+        CreateTemplate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/projects/{projectId}/templates"
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+        ListNotifications:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/projects/{projectId}/notifications"
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  DeviceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../apps/api/
+      Handler: src/device-api.handler
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:DeleteItem
+            Resource: !GetAtt NotificationTable.Arn
+      Events:
+        RegisterDevice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/devices
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        RemoveDevice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/devices
+            Method: DELETE
+            Auth:
+              Authorizer: NONE
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../apps/api/
+      Handler: src/worker.handler
+      Timeout: 60
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+              - dynamodb:Query
+              - dynamodb:TransactWriteItems
+            Resource: !GetAtt NotificationTable.Arn
+        - SQSPollerPolicy:
+            QueueName: !GetAtt DeliveryQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DeliveryQueue.QueueName
+        - Statement:
+            Effect: Allow
+            Action:
+              - ses:SendEmail
+            Resource: '*'
+            Condition:
+              StringEquals:
+                ses:FromAddress: !Ref SendingEmail
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DeliveryQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  FeedbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../apps/api/
+      Handler: src/feedback.handler
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+            Resource: !GetAtt NotificationTable.Arn
+      Events:
+        SesFeedback:
+          Type: SNS
+          Properties:
+            Topic: !Ref SesFeedbackTopic
+
+  UnsubscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../apps/api/
+      Handler: src/unsubscribe.handler
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+            Resource: !GetAtt NotificationTable.Arn
+      Events:
+        Unsubscribe:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/unsubscribe
+            Method: POST
+            Auth:
+              Authorizer: NONE
+
+  SesFeedbackTopic:
+    Type: AWS::SNS::Topic
+
+  SesConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: !Sub notification-mvp-${AWS::StackName}
+      DeliveryOptions:
+        TlsPolicy: REQUIRE
+
+  SesEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref SesConfigurationSet
+      EventDestination:
+        Enabled: true
+        MatchingEventTypes:
+          - send
+          - delivery
+          - bounce
+          - complaint
+          - reject
+          - renderingFailure
+          - deliveryDelay
+        SnsDestination:
+          TopicARN: !Ref SesFeedbackTopic
+
+  ApiErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Notification API Lambda errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SendNotificationFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  DlqDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Messages require manual DLQ review
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DeliveryDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+
+  UserPoolId:
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+
+  CognitoDomain:
+    Value: !Sub https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
+
+  QueueUrl:
+    Value: !Ref DeliveryQueue

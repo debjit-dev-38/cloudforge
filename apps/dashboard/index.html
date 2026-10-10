@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ember Studio — Notification Infrastructure Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Sidebar (256px wide, warm white bg, terracotta active accent) ─── -->
+  <aside class="sidebar" role="navigation" aria-label="Main navigation">
+    <div class="sidebar-logo">
+      <!-- Flame / Studio mark -->
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+      </svg>
+      <span class="sidebar-logo-text">Ember Studio</span>
+      <span class="sidebar-logo-badge">Notify</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="sidebar-section-label">Operations</div>
+
+      <div class="nav-item active" data-page="overview" role="button" tabindex="0" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>Overview</span>
+      </div>
+
+      <div class="nav-item" data-page="campaigns" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        <span>Campaigns</span>
+      </div>
+
+      <div class="nav-item" data-page="notifications" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Delivery History</span>
+      </div>
+
+      <div class="sidebar-section-label" style="margin-top:12px;">Configuration</div>
+
+      <div class="nav-item" data-page="templates" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Templates</span>
+      </div>
+
+      <div class="nav-item" data-page="project" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        <span>Project & API Keys</span>
+      </div>
+
+      <div class="nav-item" data-page="send" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        <span>Send Notification</span>
+      </div>
+
+      <div class="sidebar-section-label" style="margin-top:12px;">Settings</div>
+
+      <div class="nav-item" data-page="settings" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a1 1 0 0 0-1.41 0l-.71.71a7.07 7.07 0 0 0-9.9 0l-.71-.71a1 1 0 0 0-1.41 1.41l.71.71a7.07 7.07 0 0 0 0 9.9l-.71.71a1 1 0 0 0 1.41 1.41l.71-.71a7.07 7.07 0 0 0 9.9 0l.71.71a1 1 0 0 0 1.41-1.41l-.71-.71a7.07 7.07 0 0 0 0-9.9l.71-.71a1 1 0 0 0 0-1.41z"/></svg>
+        <span>Settings</span>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="nav-item" id="sidebar-auth-action" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span id="sidebar-auth-label">Login</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Top bar ───────────────────────────────────────────────────────── -->
+  <header class="topbar" role="banner">
+    <span class="topbar-title" id="topbar-title">Overview</span>
+    <div class="topbar-actions">
+      <div class="topbar-status-dot" id="api-status-dot" title="API reachable"></div>
+      <span class="text-sm text-muted" id="auth-user-label" style="margin-right:4px;">Checking authentication...</span>
+      <button class="btn btn-secondary btn-sm" id="demo-toggle-btn" title="Toggle realistic sample data" style="padding:4px 10px;font-size:12px;height:32px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        <span id="demo-toggle-label">Demo Data: ON</span>
+      </button>
+      <input
+        id="api-url-input"
+        class="form-input"
+        style="width:340px; font-size:12px; padding:6px 12px; border-radius:8px;"
+        value="https://njwgew4b9k.execute-api.ap-south-1.amazonaws.com"
+        autocomplete="url"
+        title="API base URL"
+        aria-label="API base URL"
+        placeholder="https://…"
+      >
+    </div>
+  </header>
+
+  <!-- ── Main content (Max width 1200px container) ─────────────────────── -->
+  <main class="content" id="main-content" role="main">
+    <div class="content-inner">
+
+      <!-- ─── Overview ─────────────────────────────────────────────── -->
+      <section class="page active" id="page-overview" aria-labelledby="overview-heading">
+        <div class="section-header">
+          <div>
+            <h1 id="overview-heading" class="section-title">Infrastructure Overview</h1>
+            <p class="section-subtitle">Real-time health, throughput metrics, and campaign status.</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="overview-refresh-btn" aria-label="Refresh overview">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
+            Refresh Data
+          </button>
+        </div>
+
+        <!-- Auth notice shown when not logged in -->
+        <div id="overview-auth-notice" class="alert alert-info hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Sign in to view live project delivery metrics. <button class="btn btn-ghost btn-sm" id="overview-login-btn" style="padding:0;color:var(--primary);font-weight:600;">Login with Cognito →</button></span>
+        </div>
+
+        <!-- Stat cards (4 core metrics with active left border) -->
+        <div class="stat-grid" id="stat-grid">
+          <div class="stat-card active">
+            <div class="stat-label">Total Notifications</div>
+            <div class="stat-value" id="stat-total">—</div>
+            <div class="stat-sub">Dispatched via Amazon SQS</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Delivered Successfully</div>
+            <div class="stat-value" id="stat-delivered" style="color:var(--success);">—</div>
+            <div class="stat-sub" id="stat-delivered-pct">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Delivery Failures</div>
+            <div class="stat-value" id="stat-failed" style="color:var(--error);">—</div>
+            <div class="stat-sub" id="stat-failed-pct">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Active Campaigns</div>
+            <div class="stat-value" id="stat-campaigns" style="color:var(--primary);">—</div>
+            <div class="stat-sub">Queued, running or paused</div>
+          </div>
+        </div>
+
+        <!-- Charts row: Delivery volume over time & Channel distribution -->
+        <div style="display:grid;grid-template-columns:1fr 340px;gap:20px;margin-bottom:24px;" class="overview-charts-grid">
+
+          <!-- Area chart: Delivery volume over time -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <span class="card-title">Delivery Activity Trend</span>
+                <p class="text-sm text-muted" style="margin-top:2px;">Volume across recent events</p>
+              </div>
+            </div>
+            <div class="chart-container" id="overview-chart-wrap" style="height:180px;display:flex;align-items:center;justify-content:center;">
+              <span class="text-sm text-muted">Awaiting activity data…</span>
+            </div>
+          </div>
+
+          <!-- Donut chart: Channel distribution -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <span class="card-title">Channel Distribution</span>
+                <p class="text-sm text-muted" style="margin-top:2px;">SES / Twilio / FCM</p>
+              </div>
+            </div>
+            <div id="overview-donut-wrap" style="height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;">
+              <span class="text-sm text-muted">Awaiting channel data…</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Two column: recent notifications table + active campaigns list -->
+        <div style="display:grid;grid-template-columns:1fr 340px;gap:20px;" class="overview-cols">
+          <!-- Recent notifications -->
+          <div>
+            <div class="section-header" style="margin-bottom:14px;">
+              <span class="card-title" style="font-size:14px;">Recent Delivery Records</span>
+              <button class="btn btn-ghost btn-sm" data-page="notifications" style="color:var(--primary);">View all →</button>
+            </div>
+            <div class="table-wrap">
+              <table aria-label="Recent notifications">
+                <thead>
+                  <tr>
+                    <th>Recipient</th>
+                    <th>Channel</th>
+                    <th>Template</th>
+                    <th>Status</th>
+                    <th>Timestamp</th>
+                  </tr>
+                </thead>
+                <tbody id="overview-ntf-tbody">
+                  <tr><td colspan="5"><div class="state-loading"><div class="spinner"></div><span>Loading recent deliveries…</span></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Campaign summary -->
+          <div style="display:flex;flex-direction:column;gap:16px;">
+            <div class="card" style="flex:1;">
+              <div class="card-header">
+                <span class="card-title">Active Campaigns</span>
+                <button class="btn btn-ghost btn-sm" data-page="campaigns" style="color:var(--primary);">Manage →</button>
+              </div>
+              <div id="overview-campaigns-list" style="display:flex;flex-direction:column;gap:12px;">
+                <div class="state-loading"><div class="spinner"></div><span>Loading campaigns…</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <style>
+          @media (max-width:960px) {
+            .overview-charts-grid, .overview-cols { grid-template-columns:1fr !important; }
+          }
+        </style>
+      </section>
+
+      <!-- ─── Campaigns ────────────────────────────────────────────── -->
+      <section class="page" id="page-campaigns" aria-labelledby="campaigns-heading">
+        <div class="section-header">
+          <div>
+            <h1 id="campaigns-heading" class="section-title">Bulk Campaigns</h1>
+            <p class="section-subtitle">Manage asynchronous notification broadcasts and recipient progress.</p>
+          </div>
+          <div class="flex gap-8 items-center">
+            <button class="btn btn-secondary btn-sm" id="campaigns-refresh-btn" aria-label="Refresh campaigns">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div id="campaigns-auth-notice" class="alert alert-info hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Campaign management requires an active API key. Head to <button class="btn btn-ghost btn-sm" data-page="project" style="padding:0;color:var(--primary);font-weight:600;">Project & API Keys</button> to generate or configure one.</span>
+        </div>
+
+        <div class="filter-bar">
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-input" id="campaigns-search" type="search" placeholder="Search campaigns by slug, ID or channel…" aria-label="Search campaigns">
+          </div>
+          <select class="form-select" style="width:auto;" id="campaigns-filter-status" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option value="queued">Queued</option>
+            <option value="running">Running</option>
+            <option value="paused">Paused</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select class="form-select" style="width:auto;" id="campaigns-filter-channel" aria-label="Filter by channel">
+            <option value="">All channels</option>
+            <option value="email">Email</option>
+            <option value="sms">SMS</option>
+            <option value="push">Push</option>
+          </select>
+        </div>
+
+        <div class="table-wrap">
+          <table aria-label="Campaigns">
+            <thead>
+              <tr>
+                <th>Campaign</th>
+                <th>Channel</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>Recipients</th>
+                <th>Created</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="campaigns-tbody">
+              <tr><td colspan="7"><div class="state-loading"><div class="spinner"></div><span>Loading campaigns…</span></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ─── Campaign Detail ──────────────────────────────────────── -->
+      <section class="page" id="page-campaign-detail" aria-labelledby="campaign-detail-heading">
+        <div class="section-header">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <button class="btn btn-ghost btn-sm" id="campaign-back-btn" aria-label="Back to campaigns">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+              Back to Campaigns
+            </button>
+            <h1 id="campaign-detail-heading" class="section-title">Campaign Detail</h1>
+          </div>
+          <div class="flex gap-8 items-center" id="campaign-detail-actions"></div>
+        </div>
+        <div id="campaign-detail-content">
+          <div class="state-loading"><div class="spinner"></div><span>Loading campaign…</span></div>
+        </div>
+      </section>
+
+      <!-- ─── Delivery History ─────────────────────────────────────── -->
+      <section class="page" id="page-notifications" aria-labelledby="notifications-heading">
+        <div class="section-header">
+          <div>
+            <h1 id="notifications-heading" class="section-title">Delivery History</h1>
+            <p class="section-subtitle">Real-time log of individual notifications processed asynchronously via SQS.</p>
+          </div>
+          <div class="flex gap-8 items-center">
+            <button class="btn btn-secondary btn-sm" id="ntf-refresh-btn" aria-label="Refresh delivery history">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div id="ntf-auth-notice" class="alert alert-info hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Sign in and provide a Project ID to fetch delivery records from DynamoDB.</span>
+        </div>
+
+        <div class="filter-bar">
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="search-input" id="ntf-search" type="search" placeholder="Filter by recipient, notification ID, or template…" aria-label="Search notifications">
+          </div>
+          <select class="form-select" style="width:auto;" id="ntf-filter-status" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option value="queued">Queued</option>
+            <option value="sent">Sent</option>
+            <option value="delivered">Delivered</option>
+            <option value="failed">Failed</option>
+            <option value="bounced">Bounced</option>
+          </select>
+          <select class="form-select" style="width:auto;" id="ntf-filter-channel" aria-label="Filter by channel">
+            <option value="">All channels</option>
+            <option value="email">Email</option>
+            <option value="sms">SMS</option>
+            <option value="push">Push</option>
+          </select>
+        </div>
+
+        <div class="table-wrap">
+          <table aria-label="Delivery history">
+            <thead>
+              <tr>
+                <th>Notification ID</th>
+                <th>Recipient</th>
+                <th>Channel</th>
+                <th>Template</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody id="ntf-tbody">
+              <tr><td colspan="7"><div class="state-loading"><div class="spinner"></div><span>Loading deliveries…</span></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex;justify-content:center;margin-top:20px;" id="ntf-load-more-wrap">
+          <button class="btn btn-secondary hidden" id="ntf-load-more-btn">Load More Deliveries</button>
+        </div>
+      </section>
+
+      <!-- ─── Templates ────────────────────────────────────────────── -->
+      <section class="page" id="page-templates" aria-labelledby="templates-heading">
+        <div class="section-header">
+          <div>
+            <h1 id="templates-heading" class="section-title">Message Templates</h1>
+            <p class="section-subtitle">Transactional templates with Handlebars variable substitution.</p>
+          </div>
+          <!-- Single primary terracotta CTA for view -->
+          <button class="btn btn-primary btn-sm" id="template-create-btn" aria-label="Create new template">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Template
+          </button>
+        </div>
+
+        <div id="templates-auth-notice" class="alert alert-info hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Sign in and set a Project ID before publishing templates.</span>
+        </div>
+
+        <div class="alert alert-info" style="margin-bottom:20px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>The backend supports template creation and publishing per-project. Templates created in this session are listed below.</span>
+        </div>
+
+        <div class="template-grid" id="templates-grid">
+          <div class="state-empty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <h3>No Templates Created Yet</h3>
+            <p>Publish a template to use it in notifications and campaigns.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Project & Keys ───────────────────────────────────────── -->
+      <section class="page" id="page-project" aria-labelledby="project-heading">
+        <div class="section-header">
+          <div>
+            <h1 id="project-heading" class="section-title">Project & API Keys</h1>
+            <p class="section-subtitle">Manage project namespaces and API authentication credentials.</p>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+
+          <!-- Project section -->
+          <div class="card">
+            <div class="card-header"><span class="card-title">Project Configuration</span></div>
+            <div class="form-group">
+              <label class="form-label" for="proj-id-input">Project ID</label>
+              <input class="form-input text-mono" id="proj-id-input" placeholder="prj-…" autocomplete="off">
+              <p class="form-hint">Enter your existing project identifier or register a new one below.</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="proj-name-input">Project Name</label>
+              <input class="form-input" id="proj-name-input" value="Ember Workspace">
+            </div>
+            <div class="flex gap-12">
+              <button class="btn btn-primary" id="proj-create-btn" style="flex:1;">
+                Create Project
+              </button>
+              <button class="btn btn-secondary" id="proj-save-btn" style="flex:1;">
+                Save ID to Session
+              </button>
+            </div>
+            <div id="proj-error" class="form-error-msg mt-16" role="alert" aria-live="polite"></div>
+            <div id="proj-success" class="alert alert-success hidden mt-16" role="status" aria-live="polite">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              <span id="proj-success-msg"></span>
+            </div>
+          </div>
+
+          <!-- API Keys section -->
+          <div class="card">
+            <div class="card-header"><span class="card-title">API Authentication Keys</span></div>
+            <p class="text-sm text-muted" style="margin-bottom:16px;">
+              Keys authenticate campaign and dispatch endpoints. The raw key is hashed in DynamoDB and revealed only once upon generation.
+            </p>
+            <button class="btn btn-secondary" id="key-create-btn" style="width:100%;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Generate New API Key
+            </button>
+            <div id="key-reveal-wrap" class="hidden" style="margin-top:16px;">
+              <div class="alert alert-warning" style="margin-bottom:12px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>Save this key now — it cannot be retrieved again from the backend.</span>
+              </div>
+              <div class="key-reveal">
+                <span class="key-reveal-text" id="key-reveal-value" role="textbox" aria-readonly="true" aria-label="API key"></span>
+                <button class="btn btn-ghost btn-sm" id="key-copy-btn" aria-label="Copy API key">Copy</button>
+              </div>
+              <p class="form-hint" style="margin-top:8px;" id="key-id-label"></p>
+            </div>
+            <div id="key-error" class="form-error-msg mt-16" role="alert" aria-live="polite"></div>
+            <div class="divider"></div>
+            <p class="text-sm text-muted">Session key state: <span id="key-session-status" style="font-weight:600;color:var(--warning);">None stored</span></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Send Notification ────────────────────────────────────── -->
+      <section class="page" id="page-send" aria-labelledby="send-heading">
+        <div class="section-header">
+          <div>
+            <h1 id="send-heading" class="section-title">Send Notification</h1>
+            <p class="section-subtitle">Dispatch an asynchronous transactional event via Amazon SES / Twilio / FCM.</p>
+          </div>
+        </div>
+        <div style="max-width:620px;">
+          <div class="card">
+            <div class="form-group">
+              <label class="form-label" for="send-recipient">Recipient Address / Target</label>
+              <input class="form-input text-mono" id="send-recipient" type="email" placeholder="verified-user@example.com" autocomplete="email" required>
+              <p class="form-hint">For SES sandbox testing, use an address verified in your AWS account.</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="send-template">Template Slug</label>
+              <input class="form-input text-mono" id="send-template" value="welcome" placeholder="welcome">
+            </div>
+            <div id="send-template-vars" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;"></div>
+            <div class="divider"></div>
+            <button class="btn btn-primary w-full" id="send-btn">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              Dispatch Notification
+            </button>
+            <div id="send-status" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Settings ─────────────────────────────────────────────── -->
+      <section class="page" id="page-settings" aria-labelledby="settings-heading">
+        <div class="section-header">
+          <div>
+            <h1 id="settings-heading" class="section-title">Platform Settings</h1>
+            <p class="section-subtitle">Active connection configuration and infrastructure topology.</p>
+          </div>
+        </div>
+        <div style="max-width:580px;display:flex;flex-direction:column;gap:20px;">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Cognito Authentication</span></div>
+            <p class="text-sm" id="settings-auth-state" style="margin-bottom:16px;color:var(--text-secondary);">Checking…</p>
+            <div class="flex gap-12">
+              <button class="btn btn-primary" id="settings-login-btn">Login with Cognito</button>
+              <button class="btn btn-secondary hidden" id="settings-logout-btn">Sign Out</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">API Endpoint</span></div>
+            <div class="form-group">
+              <label class="form-label" for="settings-api-url">API Gateway URL</label>
+              <input class="form-input text-mono" id="settings-api-url" autocomplete="url" placeholder="https://…">
+              <p class="form-hint">Points to your AWS HTTP API stage.</p>
+            </div>
+            <button class="btn btn-secondary" id="settings-save-url-btn">Save Endpoint URL</button>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">System Infrastructure</span></div>
+            <div style="display:flex;flex-direction:column;gap:10px;" class="text-sm">
+              <div class="flex gap-12 items-center"><span class="text-muted" style="min-width:130px;">Runtime</span><span>AWS Lambda (Node.js 22.x)</span></div>
+              <div class="flex gap-12 items-center"><span class="text-muted" style="min-width:130px;">Queue Engine</span><span>Amazon SQS with Dead Letter Queue</span></div>
+              <div class="flex gap-12 items-center"><span class="text-muted" style="min-width:130px;">Database</span><span>Amazon DynamoDB</span></div>
+              <div class="flex gap-12 items-center"><span class="text-muted" style="min-width:130px;">Email Channel</span><span>Amazon SES with Feedback Loop</span></div>
+              <div class="flex gap-12 items-center"><span class="text-muted" style="min-width:130px;">SMS Channel</span><span>Twilio SMS Provider</span></div>
+              <div class="flex gap-12 items-center"><span class="text-muted" style="min-width:130px;">Push Channel</span><span>Firebase Cloud Messaging (FCM)</span></div>
+              <div class="flex gap-12 items-center"><span class="text-muted" style="min-width:130px;">Identity</span><span>AWS Cognito User Pool (PKCE)</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Session State</span></div>
+            <p class="text-sm text-muted" style="margin-bottom:14px;">Tokens and IDs are stored in browser session storage and cleared on window close.</p>
+            <button class="btn btn-danger btn-sm" id="settings-clear-btn">Clear Local Session</button>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /content-inner -->
+  </main>
+</div><!-- /app -->
+
+<!-- ── Modals (Ember Studio styled with 12px radius & backdrop blur) ───── -->
+
+<!-- Confirm action modal -->
+<div class="modal-backdrop" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="confirm-modal-title">Confirm Action</span>
+      <button class="modal-close" id="confirm-modal-close" aria-label="Close modal">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p id="confirm-modal-body" style="color:var(--text-secondary);font-size:15px;line-height:1.6;"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="confirm-modal-cancel">Cancel</button>
+      <button class="btn btn-danger" id="confirm-modal-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create Template modal -->
+<div class="modal-backdrop" id="template-modal" role="dialog" aria-modal="true" aria-labelledby="template-modal-title">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <span class="modal-title" id="template-modal-title">New Template</span>
+      <button class="modal-close" id="template-modal-close" aria-label="Close modal">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="tpl-slug">Slug <span style="color:var(--error)">*</span></label>
+        <input class="form-input text-mono" id="tpl-slug" value="welcome" placeholder="welcome-email" pattern="[a-z0-9-]+" required>
+        <p class="form-hint">Lowercase letters, digits, and hyphens only.</p>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="tpl-subject">Subject <span style="color:var(--error)">*</span></label>
+        <input class="form-input" id="tpl-subject" value="Welcome, {{name}}" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="tpl-html">HTML Body <span style="color:var(--error)">*</span></label>
+        <textarea class="form-input form-textarea" id="tpl-html" required>&lt;p&gt;Hello {{name}}, welcome to our platform!&lt;/p&gt;</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="tpl-state">State</label>
+        <select class="form-select" id="tpl-state">
+          <option value="published">Published</option>
+          <option value="draft">Draft</option>
+        </select>
+      </div>
+      <div id="tpl-error" class="form-error-msg" role="alert" aria-live="polite"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="tpl-modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="tpl-modal-submit">Create Template</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
