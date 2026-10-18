@@ -656,6 +656,7 @@ async function loadOverview() {
     $('stat-failed').textContent = failed.toLocaleString();
     $('stat-failed-pct').textContent = `${failedPct}% failure rate`;
     $('stat-campaigns').textContent = '2';
+    $('stat-total-campaigns').textContent = MOCK_DATA.campaigns.length.toLocaleString();
 
     const channels = { email: 32400, sms: 14200, push: 7600 };
     renderDeliveryAreaChart(notifications);
@@ -687,7 +688,7 @@ async function loadOverview() {
   if (signedIn && projectId) {
     loadOverviewStats(projectId);
   } else {
-    ['stat-total','stat-delivered','stat-failed','stat-campaigns'].forEach(id => {
+    ['stat-total','stat-delivered','stat-failed','stat-campaigns','stat-total-campaigns'].forEach(id => {
       const e = $(id); if (e) e.textContent = '—';
     });
     $('overview-ntf-tbody').innerHTML = `<tr><td colspan="5"><div class="state-empty"><h3>Sign in to view real project data</h3><p>Authenticate with AWS Cognito to retrieve DynamoDB telemetry.</p></div></td></tr>`;
@@ -746,16 +747,21 @@ function renderOverviewNtfTable(items) {
 
 async function loadOverviewCampaigns(hasKey) {
   const container = $('overview-campaigns-list');
+  const completedContainer = $('overview-completed-campaigns-list');
   const projectId = storedProjectId();
   const apiKeyProjectId = storedApiKeyProjectId();
   if (!hasKey) {
     container.innerHTML = `<div class="state-empty" style="padding:16px 0;"><h3>API key required</h3><p>Configure an API key in Project & Keys to inspect active campaigns.</p></div>`;
     $('stat-campaigns').textContent = '—';
+    $('stat-total-campaigns').textContent = '—';
+    completedContainer.innerHTML = container.innerHTML;
     return;
   }
   if (!projectId || (apiKeyProjectId && apiKeyProjectId !== projectId)) {
     container.innerHTML = `<div class="state-empty" style="padding:16px 0;"><h3>Project API key mismatch</h3><p>Select the project that owns this API key, or configure a project-specific key.</p></div>`;
     $('stat-campaigns').textContent = '—';
+    $('stat-total-campaigns').textContent = '—';
+    completedContainer.innerHTML = container.innerHTML;
     return;
   }
   try {
@@ -763,14 +769,11 @@ async function loadOverviewCampaigns(hasKey) {
     if (!Array.isArray(data.items)) throw { error: 'The campaign list response was invalid.', status: 502, kind: 'http' };
     const campaigns = data.items.filter(c => !c.projectId || c.projectId === projectId);
     const active = campaigns.filter(c => ['queued','running','paused'].includes(c.state));
+    const completed = campaigns.filter(c => c.state === 'completed');
     $('stat-campaigns').textContent = active.length.toLocaleString();
+    $('stat-total-campaigns').textContent = campaigns.length.toLocaleString();
 
-    if (!active.length) {
-      container.innerHTML = `<div class="state-empty" style="padding:16px 0;"><h3>No Active Campaigns</h3><p>All broadcasts have completed or none have been scheduled.</p></div>`;
-      return;
-    }
-
-    container.innerHTML = active.slice(0, 4).map(c => {
+    container.innerHTML = active.length ? active.slice(0, 4).map(c => {
       const pct = c.total > 0 ? Math.round((c.processed / c.total) * 100) : 0;
       return `
         <div style="display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);">
@@ -781,9 +784,16 @@ async function loadOverviewCampaigns(hasKey) {
           <div class="progress-wrap"><div class="progress-fill" style="width:${pct}%"></div></div>
           <span class="text-sm text-muted">${pct}% · ${c.total.toLocaleString()} recipients</span>
         </div>`;
-    }).join('');
+    }).join('') : `<div class="state-empty" style="padding:16px 0;"><h3>No Active Campaigns</h3><p>All broadcasts have completed or none have been scheduled.</p></div>`;
+    completedContainer.innerHTML = completed.length ? completed.slice(0, 4).map(c => `
+      <div style="display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span class="truncate" style="font-size:14px;font-weight:600;max-width:180px;" title="${escHtml(c.campaignId)}">${escHtml(c.templateSlug || c.campaignId)}</span>${statusBadge(c.state)}</div>
+        <span class="text-sm text-muted">${Number(c.processed) || 0}/${Number(c.total) || 0} processed · ${Number(c.successful) || 0} successful · ${Number(c.failed) || 0} errors</span>
+      </div>`).join('') : `<div class="state-empty" style="padding:16px 0;"><h3>${campaigns.length ? 'No Recently Completed Campaigns' : 'No Campaigns Yet'}</h3><p>${campaigns.length ? 'Completed campaigns will appear here.' : 'Create a campaign to see it here.'}</p></div>`;
   } catch (err) {
     container.innerHTML = `<div class="state-empty" style="padding:16px 0;"><h3>${escHtml(friendlyError(err))}</h3></div>`;
+    completedContainer.innerHTML = container.innerHTML;
+    $('stat-total-campaigns').textContent = '—';
   }
 }
 

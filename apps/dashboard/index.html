@@ -148,6 +148,11 @@
             <div class="stat-value" id="stat-campaigns" style="color:var(--primary);">—</div>
             <div class="stat-sub">Queued, running or paused</div>
           </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Campaigns</div>
+            <div class="stat-value" id="stat-total-campaigns" style="color:var(--primary);">&mdash;</div>
+            <div class="stat-sub">All campaign statuses</div>
+          </div>
         </div>
 
         <!-- Charts row: Delivery volume over time & Channel distribution -->
@@ -217,6 +222,10 @@
               <div id="overview-campaigns-list" style="display:flex;flex-direction:column;gap:12px;">
                 <div class="state-loading"><div class="spinner"></div><span>Loading campaigns…</span></div>
               </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><span class="card-title">Recently Completed Campaigns</span></div>
+              <div id="overview-completed-campaigns-list" style="display:flex;flex-direction:column;gap:12px;"></div>
             </div>
           </div>
         </div>

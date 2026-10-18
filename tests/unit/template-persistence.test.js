@@ -169,3 +169,14 @@ test('overview campaign metrics use the selected project key and fail visibly on
   assert.match(app, /c\.projectId === projectId/);
   assert.match(app, /\['queued','running','paused'\]\.includes\(c\.state\)/);
 });
+
+test('overview exposes total and completed campaign metrics without changing active status rules', async () => {
+  const app = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
+  const html = await fs.readFile(new URL('../../apps/dashboard/index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="stat-total-campaigns"/);
+  assert.match(html, /Recently Completed Campaigns/);
+  assert.match(app, /const completed = campaigns\.filter\(c => c\.state === 'completed'\)/);
+  assert.match(app, /Number\(c\.successful\)/);
+  assert.match(app, /Number\(c\.failed\)/);
+  assert.match(app, /active = campaigns\.filter\(c => \['queued','running','paused'\]\.includes\(c\.state\)\)/);
+});
