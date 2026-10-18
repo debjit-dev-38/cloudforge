@@ -10,28 +10,41 @@ A deliberately small, multi-tenant transactional-email service. It is isolated f
 - SQS + DLQ delivery pipeline, SES sender Lambda, and SES → SNS feedback processor for deliveries, bounces, and complaints.
 - Bulk campaigns for up to 1,000 normalized recipients, with queued worker processing and pause, resume, and cancel controls.
 - Email, SMS, and Firebase push delivery through one-channel-per-notification and one-channel-per-campaign payloads.
-- CloudWatch alarms for API errors and DLQ depth, plus an S3/CloudFront static dashboard shell.
+- CloudWatch alarms for API errors and DLQ depth, plus a static dashboard shell suitable for Vercel hosting.
 
 ## Deploy
 
-Prerequisites: an AWS account/credentials, a verified SES sender identity, and the AWS SAM CLI. Deploy in an SES Region with production sending enabled.
+Prerequisites: an AWS account/credentials, a verified SES sender identity, and the AWS SAM CLI. Deploy in an SES Region with production sending enabled. The template requires `SendingEmail`, `ApiKeyPepper`, `CognitoDomainPrefix`, and `UnsubscribeSecret`; the two secret parameters are intentionally not stored in `samconfig.toml`.
 
 ```powershell
 cd playground/notification-mvp
 sam build --template-file infra/template.yaml
-sam deploy --stack-name notification-mvp --profile notification-mvp --region ap-southeast-2 --parameter-overrides 'SendingEmail=deyricky4@gmail.com' 'ApiKeyPepper=<existing-32+-character-pepper>' 'UnsubscribeSecret=<existing-32+-character-secret>' 'AllowedOrigins=https://your-dashboard-domain.example' 'CognitoDomainPrefix=notification-mvp-583372808076'
+$env:API_KEY_PEPPER = '<load an existing 32+ character value from your approved secret manager>'
+$env:UNSUBSCRIBE_SECRET = '<load an existing 32+ character value from your approved secret manager>'
+sam deploy --config-env default --parameter-overrides "ApiKeyPepper=$env:API_KEY_PEPPER" "UnsubscribeSecret=$env:UNSUBSCRIBE_SECRET"
 ```
 
-After deployment, upload the static dashboard and invalidate its cache:
+After deployment, publish the static dashboard through the intended Vercel project:
 
 ```powershell
-$bucket = aws cloudformation describe-stacks --stack-name notification-mvp --profile notification-mvp --region ap-southeast-2 --query "Stacks[0].Outputs[?OutputKey=='DashboardBucket'].OutputValue | [0]" --output text
-$distributionId = aws cloudformation list-stack-resources --stack-name notification-mvp --profile notification-mvp --region ap-southeast-2 --query "StackResourceSummaries[?LogicalResourceId=='DashboardDistribution'].PhysicalResourceId | [0]" --output text
-aws s3 sync apps/dashboard/ "s3://$bucket" --delete --profile notification-mvp --region ap-southeast-2
-aws cloudfront create-invalidation --distribution-id $distributionId --paths '/*' --profile notification-mvp
+Set-Location apps/dashboard
+# Host this static directory with the intended Vercel project after setting config.js.
 ```
 
-The deployed CloudFront URL is configured as a Cognito callback and logout URL. Open the dashboard and choose **Login with Cognito**; the dashboard retrieves the public OAuth client metadata from the API and keeps the resulting access token in `sessionStorage`. It never asks an operator to paste or display an access token.
+The configured dashboard URL is registered as a Cognito callback and logout URL. Open the dashboard and choose **Login with Cognito**; the dashboard retrieves the public OAuth client metadata from the API and keeps the resulting Cognito ID token in `sessionStorage` for API Gateway JWT authorization. It never asks an operator to paste or display a token.
+
+### Dashboard API configuration
+
+The dashboard is a plain static HTML/JavaScript application. It does not infer or guess the API endpoint. Before hosting it, set the CloudFormation `ApiUrl` output in `apps/dashboard/config.js`:
+
+```javascript
+window.NOTIFICATION_MVP_CONFIG = {
+  apiBaseUrl: '<ApiUrl output from the deployed stack>',
+  demoMode: false,
+};
+```
+
+For local development, copy `apps/dashboard/config.example.js` to `config.js` and set `apiBaseUrl` to the local SAM/API endpoint. The dashboard also permits changing the API URL in Settings. An empty URL is treated as a configuration error and does not fall back to a relative or obsolete endpoint.
 
 The API key returned when creating a key is also kept only in the current browser session so it can send a test email. Copy it at creation time: the raw key cannot be retrieved later.
 
@@ -86,7 +99,19 @@ curl -X DELETE "$API_URL/v1/devices" \
 
 ## Local verification
 
-`pnpm test` runs dependency-free tests for template rendering, input validation, hashing, and status transitions. Lambda handlers use the AWS SDK v3 supplied by the managed Node.js Lambda runtime; use SAM or deployed AWS services for integration testing.
+`pnpm test` runs local tests for template rendering, input validation, hashing, status transitions, and selected Lambda request boundaries. `pnpm install` installs the API's AWS SDK v3 dependencies required for handler imports and local tests.
+
+On Windows systems where the user-level npm cache or SAM metadata file is not writable, run SAM with project-local state:
+
+```powershell
+$env:__SAM_CLI_APP_DIR = (Resolve-Path .sam-cli).Path
+$env:NPM_CONFIG_CACHE = (Resolve-Path .npm-cache).Path
+$env:SAM_CLI_TELEMETRY = '0'
+sam validate --template-file infra/template.yaml --lint
+sam build --template-file infra/template.yaml
+```
+
+`.sam-cli`, `.npm-cache`, and `.aws-sam` are local generated directories and are ignored by Git.
 
 ## Twilio SMS provider configuration
 

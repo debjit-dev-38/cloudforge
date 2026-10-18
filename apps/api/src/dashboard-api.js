@@ -3,7 +3,7 @@ import { PutCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { apiKeyHash, decodeCursor, encodeCursor, errorResponse, json, newId, parseJson, requestId, templateVariables } from './core.js';
-import { get, getProjectMembership, key, listNotifications, revokeApiKey } from './store.js';
+import { get, getProjectMembership, key, listNotifications, listTemplates, revokeApiKey } from './store.js';
 
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
@@ -108,6 +108,10 @@ export async function handler(event) {
         ],
       }));
       return respond(201, { template });
+    }
+    if (method === 'GET' && path.endsWith('/templates')) {
+      const templates = await listTemplates(projectId);
+      return respond(200, { templates });
     }
     if (method === 'GET' && path.endsWith('/notifications')) {
       const limitValue = event.queryStringParameters?.limit;

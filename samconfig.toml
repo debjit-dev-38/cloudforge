@@ -5,9 +5,9 @@ stack_name = "notification-mvp"
 resolve_s3 = true
 s3_prefix = "notification-mvp"
 region = "ap-south-1"
-profile = "cloudforge"
+profile = "default"
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "SendingEmail=\"deyricky4@gmail.com\" AllowedOrigins=\"http://localhost:5173\" CognitoDomainPrefix=\"notification-mvp-686511309884\""
+parameter_overrides = "SendingEmail=\"deyricky4@gmail.com\" AllowedOrigins=\"http://localhost:5173,https://cloudforge-dashboard.vercel.app\" CognitoDomainPrefix=\"notification-mvp-686511309884\""
 image_repositories = []
 
 [default.global.parameters]

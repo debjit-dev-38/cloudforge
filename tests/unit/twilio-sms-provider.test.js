@@ -26,6 +26,10 @@ test('normalizes a successful Twilio response', async () => {
   assert.deepEqual(result, { outcome: 'success', provider: 'twilio', providerMessageId: 'SM123', metadata: { status: 'queued', errorCode: null } });
 });
 
+test('reports missing Twilio configuration clearly', () => {
+  assert.throws(() => createTwilioSmsProvider({ accountSid: '', authToken: '', fromNumber: '' }), /TWILIO_FROM_NUMBER is required|Twilio credentials are required/);
+});
+
 test('normalizes retryable Twilio failures', async () => {
   const error = Object.assign(new Error('Twilio is throttling requests'), { code: 30001, status: 429 });
   const provider = createTwilioSmsProvider({ fromNumber: '+15005550006', client: { messages: { create: async () => { throw error; } } } });

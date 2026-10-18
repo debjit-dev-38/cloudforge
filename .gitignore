@@ -1,5 +1,6 @@
 node_modules/
 .aws-sam/
+.sam-cli/
 .npm-cache/
 .env
 .env.*

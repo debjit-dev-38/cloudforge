@@ -109,3 +109,13 @@ export function normalizeProviderFailure({ provider, error }) {
   if (error?.disableToken) result.disableToken = true;
   return result;
 }
+
+export function sanitizeProviderFailure(errorCode, errorMessage) {
+  const sanitized = String(errorMessage || 'Provider delivery failed')
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[redacted recipient]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
+  return `${errorCode || 'PROVIDER_ERROR'}: ${sanitized}`;
+}

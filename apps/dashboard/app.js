@@ -9,6 +9,7 @@
  *   POST /v1/projects/:id/api-keys                          (Cognito)
  *   DEL  /v1/projects/:id/api-keys/:kid                     (Cognito)
  *   POST /v1/projects/:id/templates                         (Cognito)
+ *   GET  /v1/projects/:id/templates                         (Cognito)
  *   GET  /v1/projects/:id/notifications[?limit&cursor]      (Cognito)
  *   GET  /v1/campaigns                                      (API key)
  *   GET  /v1/campaigns/:id                                  (API key)
@@ -24,6 +25,7 @@ import {
   parseObjectJson,
   validateRecipient,
 } from './form-utils.js';
+import { createPkcePair, selectApiToken, tokenIsExpired } from './auth.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Session / storage keys
@@ -32,6 +34,9 @@ const SESSION = {
   accessToken: 'nfy.access-token',
   projectId:   'nfy.project-id',
   apiKey:      'nfy.api-key',
+  apiKeyProjectId: 'nfy.api-key-project-id',
+  pkceVerifier: 'nfy.pkce-verifier',
+  oauthState: 'nfy.oauth-state',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,7 +46,7 @@ let oauthConfig = null;
 let templateVariables = ['name'];
 
 /** Demo Mode — enabled by default so users can immediately experience Ember Studio */
-let isDemoMode = true;
+let isDemoMode = window.NOTIFICATION_MVP_CONFIG?.demoMode === true;
 
 const MOCK_DATA = {
   notifications: [
@@ -147,8 +152,8 @@ const MOCK_DATA = {
   ]
 };
 
-/** In-session template registry (no list endpoint exists in the backend). */
-const sessionTemplates = [...MOCK_DATA.templates];
+let sessionTemplates = [];
+let templateLoadError = null;
 
 // Notification history state & cursor
 let ntfNextCursor = null;
@@ -180,13 +185,15 @@ const text = (str) => document.createTextNode(str);
 // ─────────────────────────────────────────────────────────────────────────────
 // API helpers
 // ─────────────────────────────────────────────────────────────────────────────
-const apiUrl = () => ($('api-url-input')?.value ?? '').trim().replace(/\/$/, '');
+const apiUrl = () => (($('api-url-input')?.value || window.NOTIFICATION_MVP_CONFIG?.apiBaseUrl || '').trim().replace(/\/$/, ''));
+function requireApiUrl() {
+  const value = apiUrl();
+  if (!value) throw new Error('API URL is not configured. Set apiBaseUrl in config.js or enter it in Settings.');
+  return value;
+}
 
 const jwtExpired = (token) => {
-  try {
-    return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
-      .exp * 1000 <= Date.now();
-  } catch { return true; }
+  return tokenIsExpired(token);
 };
 
 const accessToken = () => {
@@ -195,6 +202,7 @@ const accessToken = () => {
 };
 
 const storedApiKey = () => sessionStorage.getItem(SESSION.apiKey);
+const storedApiKeyProjectId = () => sessionStorage.getItem(SESSION.apiKeyProjectId);
 const storedProjectId = () => sessionStorage.getItem(SESSION.projectId);
 
 async function payload(response) {
@@ -206,7 +214,7 @@ async function payload(response) {
 async function adminRequest(path, method = 'GET', body) {
   const token = accessToken();
   if (!token) throw { status: 401, error: 'Authentication required' };
-  return payload(await fetch(`${apiUrl()}${path}`, {
+  return payload(await fetch(`${requireApiUrl()}${path}`, {
     method,
     headers: {
       authorization: `Bearer ${token}`,
@@ -219,7 +227,7 @@ async function adminRequest(path, method = 'GET', body) {
 async function apiKeyRequest(path, method = 'GET', body) {
   const key = storedApiKey();
   if (!key) throw new Error('No API key stored. Create one in Project & API Keys.');
-  return payload(await fetch(`${apiUrl()}${path}`, {
+  return payload(await fetch(`${requireApiUrl()}${path}`, {
     method,
     headers: {
       'x-api-key': key,
@@ -341,7 +349,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item => {
 // ─────────────────────────────────────────────────────────────────────────────
 async function loadOAuthConfig() {
   if (oauthConfig) return;
-  oauthConfig = await payload(await fetch(`${apiUrl()}/v1/dashboard-config`));
+  oauthConfig = await payload(await fetch(`${requireApiUrl()}/v1/dashboard-config`));
   if (!oauthConfig.cognitoClientId || !oauthConfig.cognitoDomain) {
     throw new Error('Cognito configuration is unavailable from /v1/dashboard-config.');
   }
@@ -352,6 +360,9 @@ async function completeLogin() {
   if (params.get('error')) throw new Error(params.get('error_description') || 'Cognito login was cancelled.');
   const code = params.get('code');
   if (!code) return;
+  if (params.get('state') !== sessionStorage.getItem(SESSION.oauthState)) {
+    throw new Error('Cognito login state validation failed. Please try again.');
+  }
   const redirectUri = `${location.origin}${location.pathname}`;
   const response = await fetch(`${oauthConfig.cognitoDomain}/oauth2/token`, {
     method: 'POST',
@@ -361,22 +372,35 @@ async function completeLogin() {
       client_id: oauthConfig.cognitoClientId,
       code,
       redirect_uri: redirectUri,
+      code_verifier: sessionStorage.getItem(SESSION.pkceVerifier) || '',
     }),
   });
   const tokens = await payload(response);
-  if (!tokens.access_token) throw new Error('Cognito did not return an access token.');
-  sessionStorage.setItem(SESSION.accessToken, tokens.access_token);
+  const apiToken = selectApiToken(tokens);
+  if (!apiToken) throw new Error('Cognito did not return a usable API token.');
+  sessionStorage.setItem(SESSION.accessToken, apiToken);
+  sessionStorage.removeItem(SESSION.pkceVerifier);
+  sessionStorage.removeItem(SESSION.oauthState);
   history.replaceState({}, document.title, location.pathname);
 }
 
-function triggerLogin() {
+async function triggerLogin() {
   if (!oauthConfig) { toast('Cannot load OAuth config — check the API URL.', 'error'); return; }
+  const { verifier, challenge } = await createPkcePair();
+  const stateBytes = new Uint8Array(24);
+  crypto.getRandomValues(stateBytes);
+  const state = [...stateBytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  sessionStorage.setItem(SESSION.pkceVerifier, verifier);
+  sessionStorage.setItem(SESSION.oauthState, state);
   const redirectUri = `${location.origin}${location.pathname}`;
   location.assign(`${oauthConfig.cognitoDomain}/login?${new URLSearchParams({
     response_type: 'code',
     client_id: oauthConfig.cognitoClientId,
     redirect_uri: redirectUri,
     scope: 'openid email',
+    state,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
   })}`);
 }
 
@@ -1087,8 +1111,38 @@ function renderNtfTable() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Page: Templates
 // ─────────────────────────────────────────────────────────────────────────────
+async function loadTemplates() {
+  if (isDemoMode) {
+    templateLoadError = null;
+    sessionTemplates = [...MOCK_DATA.templates];
+    renderTemplatesGrid();
+    return;
+  }
+  const projectId = storedProjectId();
+  if (!accessToken() || !projectId) {
+    templateLoadError = null;
+    sessionTemplates = [];
+    renderTemplatesGrid();
+    return;
+  }
+  templateLoadError = null;
+  $('templates-grid').innerHTML = '<div class="state-loading"><div class="spinner"></div><span>Loading persisted templates…</span></div>';
+  try {
+    const data = await adminRequest(`/v1/projects/${encodeURIComponent(projectId)}/templates`);
+    sessionTemplates = Array.isArray(data.templates) ? data.templates : [];
+  } catch (err) {
+    sessionTemplates = [];
+    templateLoadError = friendlyError(err);
+  }
+  renderTemplatesGrid();
+}
+
 function renderTemplatesGrid() {
   const grid = $('templates-grid');
+  if (templateLoadError) {
+    grid.innerHTML = `<div class="state-empty"><h3>Templates unavailable</h3><p>${escHtml(templateLoadError)}</p></div>`;
+    return;
+  }
   if (!sessionTemplates.length) {
     grid.innerHTML = `<div class="state-empty">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -1130,14 +1184,13 @@ async function submitTemplate() {
 
   const btn = $('tpl-modal-submit');
   btn.disabled = true;
-  btn.textContent = 'Publishing…';
+   btn.textContent = 'Saving…';
 
   try {
     const data = await adminRequest(`/v1/projects/${projectId}/templates`, 'POST', { slug, subject, html, state });
-    sessionTemplates.unshift(data.template);
-    renderTemplatesGrid();
+    await loadTemplates();
     closeTemplateModal();
-    toast(`Template "${slug}" published.`, 'success');
+    toast(state === 'published' ? `Template "${slug}" published.` : `Template "${slug}" saved as a draft.`, 'success');
 
     templateVariables = data.template.variables?.length ? data.template.variables : ['name'];
     renderSendFormVars();
@@ -1175,6 +1228,8 @@ async function createProject() {
     const data = await adminRequest('/v1/projects', 'POST', { name });
     $('proj-id-input').value = data.projectId;
     sessionStorage.setItem(SESSION.projectId, data.projectId);
+    sessionStorage.removeItem(SESSION.apiKey);
+    sessionStorage.removeItem(SESSION.apiKeyProjectId);
     $('proj-success-msg').textContent = `Project "${name}" registered: ${data.projectId}`;
     $('proj-success').classList.remove('hidden');
     updateAuthUi();
@@ -1189,9 +1244,17 @@ async function createProject() {
 function saveProjectId() {
   const id = $('proj-id-input').value.trim();
   if (!id) { toast('Please enter a Project ID.', 'error'); return; }
+  const previousId = storedProjectId();
+  const hadApiKeyForDifferentProject = Boolean(storedApiKey() && storedApiKeyProjectId() !== id);
   sessionStorage.setItem(SESSION.projectId, id);
+  if ((previousId && previousId !== id) || hadApiKeyForDifferentProject) {
+    sessionStorage.removeItem(SESSION.apiKey);
+    sessionStorage.removeItem(SESSION.apiKeyProjectId);
+    toast('Project changed. Create a new API key for this project.', 'warning');
+  }
+  loadTemplates();
   updateAuthUi();
-  toast('Project ID saved to local session.', 'success');
+  if (!hadApiKeyForDifferentProject && (!previousId || previousId === id)) toast('Project ID saved to local session.', 'success');
 }
 
 async function createApiKey() {
@@ -1207,6 +1270,7 @@ async function createApiKey() {
   try {
     const data = await adminRequest(`/v1/projects/${projectId}/api-keys`, 'POST', { label: 'dashboard key' });
     sessionStorage.setItem(SESSION.apiKey, data.apiKey);
+    sessionStorage.setItem(SESSION.apiKeyProjectId, projectId);
     $('key-reveal-value').textContent = data.apiKey;
     $('key-id-label').textContent = `Key ID: ${data.keyId}`;
     $('key-reveal-wrap').classList.remove('hidden');
@@ -1297,7 +1361,7 @@ async function sendNotification() {
   try {
     const result = isDemoMode
       ? { notificationId: `ntf_demo_${Date.now()}` }
-      : await payload(await fetch(`${apiUrl()}/v1/notifications`, {
+      : await payload(await fetch(`${requireApiUrl()}/v1/notifications`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -1390,6 +1454,10 @@ async function submitCampaign() {
   }
   const body = campaignFormPayload();
   if (!storedApiKey() && !isDemoMode) { $('cmp-error').textContent = 'No API key in session. Create one in Project & API Keys.'; return; }
+  if (!isDemoMode && storedApiKeyProjectId() !== storedProjectId()) {
+    $('cmp-error').textContent = 'The API key belongs to a different project. Create a new API key for the selected project.';
+    return;
+  }
   const button = $('cmp-modal-submit');
   button.disabled = true;
   button.textContent = 'Launching...';
@@ -1469,7 +1537,7 @@ function onPageLoad(pageId) {
     case 'overview':      loadOverview(); break;
     case 'campaigns':     loadCampaigns(); break;
     case 'notifications': loadNotifications(); break;
-    case 'templates':     renderTemplatesGrid(); break;
+    case 'templates':     loadTemplates(); break;
     case 'project':       updateAuthUi(); break;
     case 'send':          variablesFromSendTemplate(); break;
     case 'devices':       renderDevices(); break;
@@ -1483,7 +1551,7 @@ function onPageLoad(pageId) {
 async function pingApi() {
   const dot = $('api-status-dot');
   try {
-    const r = await fetch(`${apiUrl()}/v1/dashboard-config`, { signal: AbortSignal.timeout(4000) });
+    const r = await fetch(`${requireApiUrl()}/v1/dashboard-config`, { signal: AbortSignal.timeout(4000) });
     const ok = r.status < 500;
     dot.style.background = ok ? 'var(--success)' : 'var(--warning)';
     dot.title = ok ? 'API stage active and reachable' : 'API returned unexpected error';
@@ -1539,6 +1607,7 @@ $('ntf-filter-status').addEventListener('change', renderNtfTable);
 $('ntf-filter-channel').addEventListener('change', renderNtfTable);
 
 $('template-create-btn').addEventListener('click', openTemplateModal);
+$('templates-refresh-btn').addEventListener('click', loadTemplates);
 $('tpl-modal-submit').addEventListener('click', submitTemplate);
 $('tpl-modal-cancel').addEventListener('click', closeTemplateModal);
 $('template-modal-close').addEventListener('click', closeTemplateModal);
@@ -1633,6 +1702,7 @@ $('api-url-input').addEventListener('change', () => {
     await completeLogin();
   } catch (err) {
     console.warn('Boot initialization warning:', err?.message ?? err);
+    toast(friendlyError(err), 'error');
   }
 
   updateAuthUi();

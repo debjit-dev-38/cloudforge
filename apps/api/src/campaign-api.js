@@ -8,10 +8,10 @@ const QueueUrl = process.env.QUEUE_URL;
 
 function header(event, name) { return event.headers?.[name] || event.headers?.[name.toLowerCase()]; }
 
-async function authorize(event) {
+export async function authorize(event, lookup = getApiKey) {
   const rawKey = header(event, 'x-api-key');
   if (!rawKey) throw new ApiError(401, 'API_KEY_REQUIRED', 'x-api-key is required');
-  const apiKey = await getApiKey(apiKeyHash(rawKey, process.env.API_KEY_PEPPER));
+  const apiKey = await lookup(apiKeyHash(rawKey, process.env.API_KEY_PEPPER));
   if (!apiKey || apiKey.revokedAt) throw new ApiError(401, 'INVALID_API_KEY', 'Invalid API key');
   return apiKey;
 }
@@ -19,8 +19,12 @@ async function authorize(event) {
 export async function handler(event) {
   const correlationId = requestId(event);
   try {
-    const apiKey = await authorize(event);
     const method = event.requestContext?.http?.method || event.httpMethod;
+    // HTTP API managed CORS normally answers preflight before Lambda. Keep this
+    // short-circuit for direct Lambda invocations and any future route changes;
+    // OPTIONS must never require an application API key.
+    if (method === 'OPTIONS') return json(204, {}, correlationId);
+    const apiKey = await authorize(event);
     const campaignId = event.pathParameters?.campaignId;
     const action = event.pathParameters?.action;
     if (method === 'GET') {
@@ -43,12 +47,13 @@ export async function handler(event) {
     }
     if (method !== 'POST') throw new ApiError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
     const body = parseJson(event.body);
-    if (typeof body.template !== 'string') throw new ApiError(400, 'INVALID_REQUEST', 'template is required');
+    if (typeof body.template !== 'string' || !body.template.trim()) throw new ApiError(400, 'INVALID_REQUEST', 'template is required');
+    const templateSlug = body.template.trim();
     const channel = body.channel || deliveryChannels.email;
     const recipients = normalizeCampaignRecipients(body);
     const push = channel === deliveryChannels.push ? normalizePushContent(body.push) : undefined;
     if (!body.data || typeof body.data !== 'object' || Array.isArray(body.data)) throw new ApiError(400, 'INVALID_REQUEST', 'data must be an object');
-    const template = await getTemplate(apiKey.projectId, body.template);
+    const template = await getTemplate(apiKey.projectId, templateSlug);
     if (!template || template.state !== 'published') throw new ApiError(404, 'TEMPLATE_NOT_FOUND', 'Published template not found');
     renderTemplate(template.subject, body.data); renderTemplate(template.html, body.data); if (template.text) renderTemplate(template.text, body.data);
     const statuses = await Promise.all(recipients.map((recipient) => getRecipient(apiKey.projectId, recipient)));

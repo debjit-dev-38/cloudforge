@@ -94,7 +94,7 @@
         id="api-url-input"
         class="form-input"
         style="width:340px; font-size:12px; padding:6px 12px; border-radius:8px;"
-        value="https://njwgew4b9k.execute-api.ap-south-1.amazonaws.com"
+        value=""
         autocomplete="url"
         title="API base URL"
         aria-label="API base URL"
@@ -381,11 +381,13 @@
             <h1 id="templates-heading" class="section-title">Message Templates</h1>
             <p class="section-subtitle">Transactional templates with Handlebars variable substitution.</p>
           </div>
-          <!-- Single primary terracotta CTA for view -->
+          <div class="flex gap-8 items-center">
+          <button class="btn btn-secondary btn-sm" id="templates-refresh-btn" aria-label="Refresh templates">Refresh</button>
           <button class="btn btn-primary btn-sm" id="template-create-btn" aria-label="Create new template">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             New Template
           </button>
+          </div>
         </div>
 
         <div id="templates-auth-notice" class="alert alert-info hidden">
@@ -395,7 +397,7 @@
 
         <div class="alert alert-info" style="margin-bottom:20px;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <span>The backend supports template creation and publishing per-project. Templates created in this session are listed below.</span>
+          <span>Templates are loaded from the selected project. Demo Data uses local examples only.</span>
         </div>
 
         <div class="template-grid" id="templates-grid">
@@ -780,6 +782,7 @@
 <!-- Toast container -->
 <div id="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>
 
+<script src="./config.js"></script>
 <script type="module" src="./app.js"></script>
 </body>
 </html>

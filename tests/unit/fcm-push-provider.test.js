@@ -24,3 +24,7 @@ test('normalizes invalid FCM tokens as permanent failures for disabling', async 
   const provider = createFcmPushProvider({ client: { sendMessage: async () => { throw error; } } });
   assert.deepEqual(await provider.send({ delivery, content }), { outcome: 'failure', provider: 'fcm', errorCode: 'UNREGISTERED', errorMessage: 'Requested entity was not found', retryable: false, disableToken: true });
 });
+
+test('reports missing FCM configuration clearly', () => {
+  assert.throws(() => createFcmPushProvider({ projectId: '', serviceAccountJson: '' }), /FCM_PROJECT_ID is required|Invalid FCM service account configuration/);
+});

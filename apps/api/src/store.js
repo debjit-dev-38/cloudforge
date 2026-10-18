@@ -11,7 +11,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { createHash, randomUUID } from 'node:crypto';
 
-const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+let client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
 const now = () => new Date().toISOString();
 
@@ -49,6 +49,27 @@ export async function getTemplate(projectId, slug) {
 
 export async function getTemplateVersion(projectId, slug, version) {
   return get(key.project(projectId), key.template(slug, version));
+}
+
+export async function listTemplates(projectId) {
+  const pointers = [];
+  let ExclusiveStartKey;
+  do {
+    const result = await client.send(new QueryCommand({
+      TableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: { ':pk': key.project(projectId), ':prefix': 'TEMPLATE#' },
+      ScanIndexForward: true,
+      ExclusiveStartKey,
+    }));
+    pointers.push(...(result.Items || []).filter((item) => item.SK.endsWith('#CURRENT')));
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  const templates = await Promise.all(pointers.map(async (pointer) => {
+    const slug = pointer.SK.slice('TEMPLATE#'.length, -'#CURRENT'.length);
+    return getTemplate(projectId, slug);
+  }));
+  return templates.filter(Boolean).sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
 export async function getRecipient(projectId, email) {
@@ -112,8 +133,24 @@ export async function createCampaign({ campaign, recipients }) {
   const chunks = [];
   for (let index = 0; index < recipients.length; index += 90) chunks.push(recipients.slice(index, index + 90));
   await client.send(new TransactWriteCommand({ TableName, TransactItems: [{ Put: { TableName, Item: campaign, ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)' } }] }));
-  for (const chunk of chunks) {
-    await client.send(new TransactWriteCommand({ TableName, TransactItems: chunk.map((recipient) => ({ Put: { TableName, Item: { PK: key.project(campaign.projectId), SK: key.campaignRecipient(campaign.campaignId, recipient), campaignId: campaign.campaignId, projectId: campaign.projectId, recipient, status: 'pending' }, ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)' } })) }));
+  try {
+    for (const chunk of chunks) {
+      await client.send(new TransactWriteCommand({ TableName, TransactItems: chunk.map((recipient) => ({ Put: { TableName, Item: { PK: key.project(campaign.projectId), SK: key.campaignRecipient(campaign.campaignId, recipient), campaignId: campaign.campaignId, projectId: campaign.projectId, recipient, status: 'pending' }, ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)' } })) }));
+    }
+  } catch (error) {
+    try {
+      await client.send(new UpdateCommand({
+        TableName,
+        Key: { PK: key.project(campaign.projectId), SK: key.campaign(campaign.campaignId) },
+        UpdateExpression: 'SET #state = :failed, failureReason = :reason, updatedAt = :updatedAt',
+        ConditionExpression: '#state = :queued',
+        ExpressionAttributeNames: { '#state': 'state' },
+        ExpressionAttributeValues: { ':queued': 'queued', ':failed': 'failed', ':reason': 'Campaign recipient initialization failed', ':updatedAt': now() },
+      }));
+    } catch (markFailedError) {
+      console.error(JSON.stringify({ event: 'campaign_initialization_failure_unrecorded', projectId: campaign.projectId, campaignId: campaign.campaignId, errorName: markFailedError.name }));
+    }
+    throw error;
   }
 }
 
@@ -137,16 +174,30 @@ export async function claimCampaignRecipient(projectId, campaignId, recipient, l
 }
 
 export async function listPendingCampaignRecipients(projectId, campaignId, limit = 25, leaseCutoff = new Date(Date.now() - 300000).toISOString()) {
-  const result = await client.send(new QueryCommand({ TableName, KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)', FilterExpression: '#status = :pending OR (#status = :processing AND claimedAt < :leaseCutoff)', ExpressionAttributeNames: { '#status': 'status' }, ExpressionAttributeValues: { ':pk': key.project(projectId), ':prefix': `CAMPAIGN#${campaignId}#RECIPIENT#`, ':pending': 'pending', ':processing': 'processing', ':leaseCutoff': leaseCutoff }, Limit: Math.min(limit, 25) }));
-  return result.Items || [];
+  const items = [];
+  let ExclusiveStartKey;
+  const pageLimit = Math.min(Math.max(limit, 1), 25);
+  do {
+    const result = await client.send(new QueryCommand({ TableName, KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)', FilterExpression: '#status = :pending OR (#status = :processing AND claimedAt < :leaseCutoff)', ExpressionAttributeNames: { '#status': 'status' }, ExpressionAttributeValues: { ':pk': key.project(projectId), ':prefix': `CAMPAIGN#${campaignId}#RECIPIENT#`, ':pending': 'pending', ':processing': 'processing', ':leaseCutoff': leaseCutoff }, Limit: pageLimit, ExclusiveStartKey }));
+    items.push(...(result.Items || []));
+    if (items.length >= pageLimit) return items.slice(0, pageLimit);
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return items;
 }
 
-export async function completeCampaignRecipient({ projectId, campaignId, recipient, status, error, claimToken }) {
+export async function completeCampaignRecipient({ projectId, campaignId, recipient, status, error, providerMessageId, claimToken }) {
   const success = status === 'succeeded';
   await client.send(new TransactWriteCommand({ TableName, TransactItems: [
-    { Update: { TableName, Key: { PK: key.project(projectId), SK: key.campaignRecipient(campaignId, recipient) }, UpdateExpression: 'SET #status = :status, updatedAt = :updatedAt, failureReason = :error', ConditionExpression: '#status = :processing AND claimToken = :claimToken', ExpressionAttributeNames: { '#status': 'status' }, ExpressionAttributeValues: { ':processing': 'processing', ':status': status, ':updatedAt': now(), ':error': error || null, ':claimToken': claimToken } } },
-    { Update: { TableName, Key: { PK: key.project(projectId), SK: key.campaign(campaignId) }, UpdateExpression: 'SET processed = if_not_exists(processed, :zero) + :one, successful = if_not_exists(successful, :zero) + :success, failed = if_not_exists(failed, :zero) + :failure, pending = if_not_exists(pending, :zero) - :one, updatedAt = :updatedAt', ExpressionAttributeValues: { ':zero': 0, ':one': 1, ':success': success ? 1 : 0, ':failure': success ? 0 : 1, ':updatedAt': now() } } },
+    { Update: { TableName, Key: { PK: key.project(projectId), SK: key.campaignRecipient(campaignId, recipient) }, UpdateExpression: 'SET #status = :status, updatedAt = :updatedAt, failureReason = :error, providerMessageId = :providerMessageId', ConditionExpression: '#status = :processing AND claimToken = :claimToken', ExpressionAttributeNames: { '#status': 'status' }, ExpressionAttributeValues: { ':processing': 'processing', ':status': status, ':updatedAt': now(), ':error': error || null, ':providerMessageId': providerMessageId || null, ':claimToken': claimToken } } },
+    { Update: { TableName, Key: { PK: key.project(projectId), SK: key.campaign(campaignId) }, UpdateExpression: 'SET #processed = if_not_exists(#processed, :zero) + :one, #successful = if_not_exists(#successful, :zero) + :success, #failed = if_not_exists(#failed, :zero) + :failure, #pending = if_not_exists(#pending, :zero) - :one, updatedAt = :updatedAt', ConditionExpression: '#pending > :zero', ExpressionAttributeNames: { '#processed': 'processed', '#successful': 'successful', '#failed': 'failed', '#pending': 'pending' }, ExpressionAttributeValues: { ':zero': 0, ':one': 1, ':success': success ? 1 : 0, ':failure': success ? 0 : 1, ':updatedAt': now() } } },
   ] }));
+}
+
+export function setStoreClientForTests(nextClient) {
+  const previous = client;
+  client = nextClient;
+  return () => { client = previous; };
 }
 
 export async function releaseCampaignRecipient(projectId, campaignId, recipient, claimToken) {

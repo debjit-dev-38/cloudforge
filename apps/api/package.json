@@ -2,5 +2,11 @@
   "name": "@notification-mvp/api",
   "private": true,
   "version": "0.1.0",
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.900.0",
+    "@aws-sdk/client-sesv2": "^3.900.0",
+    "@aws-sdk/client-sqs": "^3.900.0",
+    "@aws-sdk/lib-dynamodb": "^3.900.0"
+  }
 }

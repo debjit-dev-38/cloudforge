@@ -38,6 +38,21 @@ Parameters:
     NoEcho: true
     Description: Firebase service-account JSON, preferably supplied as a Secrets Manager dynamic reference
 
+  TwilioAccountSid:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Optional Twilio account SID, preferably supplied through a secret reference
+  TwilioAuthToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Optional Twilio auth token, preferably supplied through a secret reference
+  TwilioFromNumber:
+    Type: String
+    Default: ''
+    Description: Optional Twilio sender number in E.164 format
+
 Globals:
   Function:
     Runtime: nodejs22.x
@@ -53,6 +68,9 @@ Globals:
         UNSUBSCRIBE_SECRET: !Ref UnsubscribeSecret
         FCM_PROJECT_ID: !Ref FcmProjectId
         FCM_SERVICE_ACCOUNT_JSON: !Ref FcmServiceAccountJson
+        TWILIO_ACCOUNT_SID: !Ref TwilioAccountSid
+        TWILIO_AUTH_TOKEN: !Ref TwilioAuthToken
+        TWILIO_FROM_NUMBER: !Ref TwilioFromNumber
         COGNITO_CLIENT_ID: !Ref UserPoolClient
         COGNITO_USER_POOL_ID: !Ref UserPool
         COGNITO_DOMAIN: !Sub https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
@@ -206,7 +224,15 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /v1/campaigns
-            Method: ANY
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        CampaignCreate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/campaigns
+            Method: POST
             Auth:
               Authorizer: NONE
         CampaignItem:
@@ -214,7 +240,7 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: "/v1/campaigns/{campaignId}"
-            Method: ANY
+            Method: GET
             Auth:
               Authorizer: NONE
         CampaignAction:
@@ -284,6 +310,15 @@ Resources:
             ApiId: !Ref HttpApi
             Path: "/v1/projects/{projectId}/templates"
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+        ListTemplates:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/projects/{projectId}/templates"
+            Method: GET
             Auth:
               Authorizer: CognitoAuthorizer
 

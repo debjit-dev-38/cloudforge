@@ -1,5 +1,5 @@
 // SQS-triggered SES delivery Lambda handler.
-import { campaignQueueMessage, createDelivery, deliveryChannels, selectProvider } from './delivery.js';
+import { campaignQueueMessage, createDelivery, deliveryChannels, sanitizeProviderFailure, selectProvider } from './delivery.js';
 import { createSesEmailProvider } from './providers/ses-email-provider.js';
 import { createTwilioSmsProvider } from './providers/twilio-sms-provider.js';
 import { createFcmPushProvider } from './providers/fcm-push-provider.js';
@@ -16,6 +16,14 @@ const QueueUrl = process.env.QUEUE_URL;
 let smsProvider;
 let pushProvider;
 
+const dependencies = { get, getCampaign, getRecipient, getTemplateVersion, listDevices, listPendingCampaignRecipients, claimCampaignRecipient, completeCampaignRecipient, releaseCampaignRecipient, updateCampaignState, updateStatus, disableDevice, sqs, emailProvider };
+
+export function setWorkerDependenciesForTests(overrides) {
+  const previous = { ...dependencies };
+  Object.assign(dependencies, overrides);
+  return () => Object.assign(dependencies, previous);
+}
+
 function getSmsProvider() {
   smsProvider ||= createTwilioSmsProvider();
   return smsProvider;
@@ -26,42 +34,59 @@ function getPushProvider() {
   return pushProvider;
 }
 
+function providerConfigurationError(error) {
+  return /required|incomplete|configuration/i.test(error?.message || '');
+}
+
 async function processCampaignRecord({ projectId, campaignId }) {
-  const campaign = await getCampaign(projectId, campaignId);
+  const campaign = await dependencies.getCampaign(projectId, campaignId);
   if (!campaign || campaign.state === 'paused' || campaign.state === 'cancelled' || campaign.state === 'completed') return;
   if (campaign.state === 'queued') {
-    try { await updateCampaignState(projectId, campaignId, 'queued', 'running'); } catch (error) { if (error.name !== 'ConditionalCheckFailedException') throw error; }
+    try { await dependencies.updateCampaignState(projectId, campaignId, 'queued', 'running'); } catch (error) { if (error.name !== 'ConditionalCheckFailedException') throw error; }
   }
-  const current = await getCampaign(projectId, campaignId);
+  const current = await dependencies.getCampaign(projectId, campaignId);
   if (!current || current.state !== 'running') return;
-  const template = await getTemplateVersion(projectId, campaign.templateSlug, campaign.templateVersion);
+  const template = await dependencies.getTemplateVersion(projectId, campaign.templateSlug, campaign.templateVersion);
   if (!template) throw new Error('Campaign template unavailable');
-  const recipients = await listPendingCampaignRecipients(projectId, campaignId, 25);
-  if (!recipients.length) { await updateCampaignState(projectId, campaignId, 'running', 'completed'); return; }
-  const provider = selectProvider(current.channel, { email: emailProvider, sms: current.channel === deliveryChannels.sms ? getSmsProvider() : undefined, push: current.channel === deliveryChannels.push ? getPushProvider() : undefined });
+  const recipients = await dependencies.listPendingCampaignRecipients(projectId, campaignId, 25);
+  if (!recipients.length) {
+    const latest = await dependencies.getCampaign(projectId, campaignId);
+    if (latest?.pending === 0) await dependencies.updateCampaignState(projectId, campaignId, 'running', 'completed');
+    return;
+  }
+  let provider;
+  try {
+    provider = selectProvider(current.channel, { email: dependencies.emailProvider, sms: current.channel === deliveryChannels.sms ? getSmsProvider() : undefined, push: current.channel === deliveryChannels.push ? getPushProvider() : undefined });
+  } catch (error) {
+    if (!providerConfigurationError(error)) throw error;
+    await dependencies.updateCampaignState(projectId, campaignId, current.state, 'failed');
+    console.error(JSON.stringify({ event: 'campaign_provider_unavailable', projectId, campaignId, channel: current.channel, error: error.message }));
+    return;
+  }
   const content = current.channel === deliveryChannels.push ? current.push : { subject: renderTemplate(template.subject, current.data), html: renderTemplate(template.html, current.data), text: renderTemplate(template.text || template.html.replace(/<[^>]+>/g, ''), current.data) };
   for (const item of recipients) {
-    const liveCampaign = await getCampaign(projectId, campaignId);
+    const liveCampaign = await dependencies.getCampaign(projectId, campaignId);
     if (!liveCampaign || liveCampaign.state !== 'running') return;
-    const claimed = await claimCampaignRecipient(projectId, campaignId, item.recipient);
+    const claimed = await dependencies.claimCampaignRecipient(projectId, campaignId, item.recipient);
     if (!claimed) continue;
-    const suppressed = await getRecipient(projectId, item.recipient);
-    if (suppressed?.status === 'suppressed' || suppressed?.status === 'opted_out') { await completeCampaignRecipient({ projectId, campaignId, recipient: item.recipient, status: 'failed', error: suppressed.status, claimToken: claimed.claimToken }); continue; }
-    const targets = current.channel === deliveryChannels.push ? (await listDevices(projectId, item.recipient)).filter((device) => device.status === 'active') : [{ token: item.recipient }];
-    let delivered = false; let retryable = false; let failure;
+    const suppressed = await dependencies.getRecipient(projectId, item.recipient);
+    if (suppressed?.status === 'suppressed' || suppressed?.status === 'opted_out') { await dependencies.completeCampaignRecipient({ projectId, campaignId, recipient: item.recipient, status: 'failed', error: suppressed.status, claimToken: claimed.claimToken }); continue; }
+    const targets = current.channel === deliveryChannels.push ? (await dependencies.listDevices(projectId, item.recipient)).filter((device) => device.status === 'active') : [{ token: item.recipient }];
+    let delivered = false; let retryable = false; let failure; let failureCode; let providerMessageId;
     for (const target of targets) {
-      const result = await provider.send({ delivery: { ...createDelivery({ notificationId: `${campaignId}:${item.recipient}`, projectId, organizationId: current.organizationId, recipient: target.token }, current.channel) }, content });
-      if (result.outcome === 'success') { delivered = true; break; }
-      if (result.disableToken) await disableDevice(projectId, item.recipient, target.token, result.errorCode);
-      retryable ||= result.retryable; failure = result.errorMessage;
+      const result = await provider.send({ delivery: { ...createDelivery({ notificationId: campaignId, projectId, organizationId: current.organizationId, recipient: target.token }, current.channel) }, content });
+      if (result.outcome === 'success') { delivered = true; providerMessageId = result.providerMessageId; break; }
+      if (result.disableToken) await dependencies.disableDevice(projectId, item.recipient, target.token, result.errorCode);
+      retryable ||= result.retryable; failure = result.errorMessage; failureCode = result.errorCode;
     }
-    if (retryable && !delivered) { await releaseCampaignRecipient(projectId, campaignId, item.recipient, claimed.claimToken); throw new Error(failure || 'Campaign delivery retry'); }
-    await completeCampaignRecipient({ projectId, campaignId, recipient: item.recipient, status: delivered ? 'succeeded' : 'failed', error: delivered ? undefined : failure || (targets.length ? 'Delivery failed' : 'No active devices'), claimToken: claimed.claimToken });
+    if (retryable && !delivered) { await dependencies.releaseCampaignRecipient(projectId, campaignId, item.recipient, claimed.claimToken); throw new Error(failure || 'Campaign delivery retry'); }
+    await dependencies.completeCampaignRecipient({ projectId, campaignId, recipient: item.recipient, status: delivered ? 'succeeded' : 'failed', error: delivered ? undefined : sanitizeProviderFailure(failureCode, failure || (targets.length ? 'Delivery failed' : 'No active devices')), providerMessageId: delivered ? providerMessageId : undefined, claimToken: claimed.claimToken });
   }
-  const latest = await getCampaign(projectId, campaignId);
+  const latest = await dependencies.getCampaign(projectId, campaignId);
   if (!latest || latest.state !== 'running') return;
-  if (latest.pending > 0) await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: campaignQueueMessage(projectId, campaignId) }));
-  else await updateCampaignState(projectId, campaignId, 'running', 'completed');
+  if (latest.pending > 0) await dependencies.sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: campaignQueueMessage(projectId, campaignId) }));
+  else if ((await dependencies.listPendingCampaignRecipients(projectId, campaignId, 1)).length > 0) await dependencies.sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: campaignQueueMessage(projectId, campaignId) }));
+  else await dependencies.updateCampaignState(projectId, campaignId, 'running', 'completed');
 }
 
 async function processRecord(record) {
@@ -93,11 +118,19 @@ async function processRecord(record) {
     return;
   }
 
-  const provider = selectProvider(channel, {
-    email: emailProvider,
-    sms: channel === deliveryChannels.sms ? getSmsProvider() : undefined,
-    push: channel === deliveryChannels.push ? getPushProvider() : undefined,
-  });
+  let provider;
+  try {
+    provider = selectProvider(channel, {
+      email: emailProvider,
+      sms: channel === deliveryChannels.sms ? getSmsProvider() : undefined,
+      push: channel === deliveryChannels.push ? getPushProvider() : undefined,
+    });
+  } catch (error) {
+    if (!providerConfigurationError(error)) throw error;
+    await updateStatus(projectId, notificationId, 'processing', 'failed', { failureReason: error.message, retryable: false });
+    console.error(JSON.stringify({ event: 'notification_provider_unavailable', projectId, notificationId, channel, error: error.message }));
+    return;
+  }
   const devices = channel === deliveryChannels.push ? (await listDevices(projectId, notification.recipient)).filter((device) => device.status === 'active') : [{ token: notification.recipient }];
   if (!devices.length) {
     await updateStatus(projectId, notificationId, 'processing', 'failed', { failureReason: 'No active devices registered', retryable: false });
