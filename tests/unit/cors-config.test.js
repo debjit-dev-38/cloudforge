@@ -14,7 +14,7 @@ test('HTTP API CORS allows headers used by the frontend and supported methods', 
   for (const header of ['authorization', 'content-type', 'x-api-key', 'idempotency-key', 'x-request-id']) {
     assert.match(template, new RegExp(`\\s+- ${header}\\s`));
   }
-  for (const method of ['GET', 'POST', 'DELETE', 'OPTIONS']) {
+  for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']) {
     assert.match(template, new RegExp(`\\s+- ${method}\\s`));
   }
 });

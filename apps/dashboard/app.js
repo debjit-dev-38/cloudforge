@@ -154,6 +154,7 @@ const MOCK_DATA = {
 
 let sessionTemplates = [];
 let templateLoadError = null;
+let templateMode = 'create';
 let editingTemplate = null;
 const deletingTemplateSlugs = new Set();
 
@@ -209,21 +210,27 @@ const storedProjectId = () => sessionStorage.getItem(SESSION.projectId);
 
 async function payload(response) {
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw { ...data, status: response.status };
+  if (!response.ok) throw { ...data, status: response.status, statusText: response.statusText, kind: 'http' };
   return data;
 }
 
 async function adminRequest(path, method = 'GET', body) {
   const token = accessToken();
   if (!token) throw { status: 401, error: 'Authentication required' };
-  return payload(await fetch(`${requireApiUrl()}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  }));
+  const url = `${requireApiUrl()}${path}`;
+  try {
+    return await payload(await fetch(url, {
+      method,
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    }));
+  } catch (err) {
+    if (err?.kind === 'http' || err?.status) throw err;
+    throw { kind: 'network', method, url, cause: err };
+  }
 }
 
 async function apiKeyRequest(path, method = 'GET', body) {
@@ -242,13 +249,17 @@ async function apiKeyRequest(path, method = 'GET', body) {
 const friendlyError = (err) => {
   const detail = err?.error || err?.message || 'The request could not be completed.';
   if (err?.status === 401) return 'Session expired or not authenticated. Please log in.';
+  if (err?.status === 403) return 'The signed-in user is not authorized for this project.';
+  if (err?.status === 404) return err?.code === 'TEMPLATE_NOT_FOUND' ? 'Template not found; refresh the Templates page.' : 'The requested API resource was not found.';
+  if (err?.status === 409) return err?.code === 'TEMPLATE_VERSION_CONFLICT' ? 'This template changed elsewhere. Refresh it and try again.' : detail;
+  if (err?.kind === 'network') return `Could not reach the API for ${err.method} ${err.url}. This may be a network or CORS preflight failure; verify the API URL and that ${err.method} is allowed by the deployed API.`;
   if (/Published template not found/i.test(detail)) return 'Template not found or not published.';
   if (/valid email/i.test(detail)) return 'Enter a valid recipient email address.';
   if (/suppressed|opted.?out/i.test(detail)) return 'One or more recipients are suppressed or opted out.';
   if (/rate limit/i.test(detail)) return 'The project rate limit was reached. Try again shortly.';
   if (/provider/i.test(detail)) return 'The delivery provider rejected the request. Check provider configuration.';
   if (/Missing template variable/i.test(detail)) return detail;
-  if (/network|fetch|failed to fetch/i.test(String(err))) return 'Network error — check the API URL and your connection.';
+  if (/network|fetch|failed to fetch/i.test(String(err))) return 'Network or CORS error — check the API URL and browser connection details.';
   return detail;
 };
 
@@ -1223,15 +1234,16 @@ async function submitTemplate() {
    btn.textContent = 'Saving…';
 
   try {
-    const path = editingTemplate
+    const isEdit = templateMode === 'edit';
+    const path = isEdit
       ? `/v1/projects/${encodeURIComponent(projectId)}/templates/${encodeURIComponent(editingTemplate.slug)}`
       : `/v1/projects/${encodeURIComponent(projectId)}/templates`;
-    const data = await adminRequest(path, editingTemplate ? 'PUT' : 'POST', editingTemplate
+    const data = await adminRequest(path, isEdit ? 'PUT' : 'POST', isEdit
       ? { subject, html, state, expectedVersion: editingTemplate.version }
       : { slug, subject, html, state });
     await loadTemplates();
     closeTemplateModal();
-    toast(editingTemplate ? `Template "${slug}" updated as ${state}.` : (state === 'published' ? `Template "${slug}" published.` : `Template "${slug}" saved as a draft.`), 'success');
+    toast(isEdit ? `Template "${slug}" updated as ${state}.` : (state === 'published' ? `Template "${slug}" published.` : `Template "${slug}" saved as a draft.`), 'success');
 
     templateVariables = data.template.variables?.length ? data.template.variables : ['name'];
     renderSendFormVars();
@@ -1239,15 +1251,16 @@ async function submitTemplate() {
     $('tpl-error').textContent = friendlyError(err);
   } finally {
     btn.disabled = false;
-    btn.textContent = editingTemplate ? 'Save Changes' : 'Create Template';
+    btn.textContent = templateMode === 'edit' ? 'Save Changes' : 'Create Template';
   }
 }
 
 function openTemplateModal(template = null) {
-  editingTemplate = template;
+  templateMode = template ? 'edit' : 'create';
+  editingTemplate = templateMode === 'edit' ? template : null;
   $('tpl-error').textContent = '';
-  $('template-modal-title').textContent = template ? `Edit Template: ${template.slug}` : 'New Template';
-  $('tpl-modal-submit').textContent = template ? 'Save Changes' : 'Create Template';
+  $('template-modal-title').textContent = templateMode === 'edit' ? `Edit Template: ${template.slug}` : 'Create Template';
+  $('tpl-modal-submit').textContent = templateMode === 'edit' ? 'Save Changes' : 'Create Template';
   $('tpl-slug').value = template?.slug || 'welcome';
   $('tpl-slug').disabled = Boolean(template);
   $('tpl-subject').value = template?.subject || 'Welcome, {{name}}';
@@ -1259,9 +1272,10 @@ function openTemplateModal(template = null) {
 
 function closeTemplateModal() {
   $('template-modal').classList.remove('open');
+  templateMode = 'create';
   editingTemplate = null;
   $('tpl-slug').disabled = false;
-  $('template-modal-title').textContent = 'New Template';
+  $('template-modal-title').textContent = 'Create Template';
   $('tpl-modal-submit').textContent = 'Create Template';
 }
 
@@ -1659,7 +1673,7 @@ $('ntf-search').addEventListener('input', renderNtfTable);
 $('ntf-filter-status').addEventListener('change', renderNtfTable);
 $('ntf-filter-channel').addEventListener('change', renderNtfTable);
 
-$('template-create-btn').addEventListener('click', openTemplateModal);
+$('template-create-btn').addEventListener('click', () => openTemplateModal());
 $('templates-refresh-btn').addEventListener('click', loadTemplates);
 $('templates-grid').addEventListener('click', (event) => {
   const button = event.target.closest('[data-template-action]');

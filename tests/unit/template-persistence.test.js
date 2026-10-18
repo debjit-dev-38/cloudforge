@@ -91,7 +91,23 @@ test('template management uses project-authorized versioned update and pointer d
   assert.match(template, /data-template-action="view"/);
   assert.match(template, /data-template-action="edit"/);
   assert.match(template, /data-template-action="delete"/);
-  assert.match(template, /adminRequest\(path, editingTemplate \? 'PUT' : 'POST'/);
+  assert.match(template, /adminRequest\(path, isEdit \? 'PUT' : 'POST'/);
   assert.match(template, /Demo templates are read-only/);
   assert.match(template, /sessionTemplates = \[\];\s+templateLoadError = friendlyError\(err\)/);
+  assert.match(template, /method, url, cause: err/);
+  assert.match(template, /err\?\.status === 409/);
+});
+
+test('new and edit template flows use explicit modes and separate HTTP operations', async () => {
+  const app = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
+  const html = await fs.readFile(new URL('../../apps/dashboard/index.html', import.meta.url), 'utf8');
+  assert.match(app, /let templateMode = 'create'/);
+  assert.match(app, /template-create-btn'\)\.addEventListener\('click', \(\) => openTemplateModal\(\)\)/);
+  assert.match(app, /templateMode = template \? 'edit' : 'create'/);
+  assert.match(app, /const isEdit = templateMode === 'edit'/);
+  assert.match(app, /adminRequest\(path, isEdit \? 'PUT' : 'POST'/);
+  assert.match(app, /editingTemplate = templateMode === 'edit' \? template : null/);
+  assert.match(app, /templateMode = 'create';\s+editingTemplate = null/);
+  assert.doesNotMatch(app, /addEventListener\('click', openTemplateModal\)/);
+  assert.match(html, /id="template-modal-title">Create Template/);
 });
