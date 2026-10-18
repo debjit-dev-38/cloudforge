@@ -56,11 +56,13 @@ export async function handler(event) {
     const template = await getTemplate(apiKey.projectId, templateSlug);
     if (!template || template.state !== 'published') throw new ApiError(404, 'TEMPLATE_NOT_FOUND', 'Published template not found');
     renderTemplate(template.subject, body.data); renderTemplate(template.html, body.data); if (template.text) renderTemplate(template.text, body.data);
+    const dltVariableMapping = channel === deliveryChannels.sms ? body.dltVariableMapping : undefined;
+    if (channel === deliveryChannels.sms && (!Array.isArray(dltVariableMapping) || dltVariableMapping.length === 0 || dltVariableMapping.some((name) => !template.variables.includes(name) || typeof name !== 'string'))) throw new ApiError(400, 'INVALID_DLT_VARIABLE_MAPPING', 'dltVariableMapping must list existing template variables in order');
     const statuses = await Promise.all(recipients.map((recipient) => getRecipient(apiKey.projectId, recipient)));
     if (statuses.some((status) => status?.status === 'suppressed' || status?.status === 'opted_out')) throw new ApiError(409, 'RECIPIENT_SUPPRESSED', 'A recipient is suppressed');
     for (let index = 0; index < recipients.length; index += 1) await consumeRateLimit(apiKey.projectId, apiKey.maxPerMinute || 60);
     const newCampaignId = newId('cmp'); const createdAt = new Date().toISOString();
-    const campaign = { PK: key.project(apiKey.projectId), SK: key.campaign(newCampaignId), campaignId: newCampaignId, projectId: apiKey.projectId, organizationId: apiKey.organizationId, templateSlug: template.slug, templateVersion: template.version, channel, data: body.data, ...(push ? { push } : {}), state: 'queued', total: recipients.length, processed: 0, successful: 0, failed: 0, pending: recipients.length, createdAt, updatedAt: createdAt };
+    const campaign = { PK: key.project(apiKey.projectId), SK: key.campaign(newCampaignId), campaignId: newCampaignId, projectId: apiKey.projectId, organizationId: apiKey.organizationId, templateSlug: template.slug, templateVersion: template.version, channel, data: body.data, ...(dltVariableMapping ? { dltVariableMapping } : {}), ...(push ? { push } : {}), state: 'queued', total: recipients.length, processed: 0, successful: 0, failed: 0, pending: recipients.length, createdAt, updatedAt: createdAt };
     await createCampaign({ campaign, recipients });
     await sqs.send(new SendMessageCommand({ QueueUrl, MessageBody: campaignQueueMessage(apiKey.projectId, newCampaignId) }));
     return json(202, { campaignId: newCampaignId, state: 'queued', total: recipients.length }, correlationId);

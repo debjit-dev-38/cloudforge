@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import { listPendingCampaignRecipients, createCampaign, completeCampaignRecipient, setStoreClientForTests } from '../../apps/api/src/store.js';
 import { handler, setWorkerDependenciesForTests } from '../../apps/api/src/worker.js';
@@ -97,6 +98,11 @@ test('worker does not complete a campaign when its counters still show pending w
   const updates = [];
   const harness = workerHarness({ current: campaign({ pending: 1 }), recipients: [], latest: campaign({ pending: 1 }), onComplete: (event) => updates.push(event) });
   try { const result = await handler({ Records: [{ messageId: 'm1', body: JSON.stringify({ campaign: true, projectId: 'prj_1', campaignId: 'cmp_1' }) }] }); assert.deepEqual(result, { batchItemFailures: [] }); assert.equal(updates.length, 0); } finally { harness.restore(); }
+});
+
+test('dashboard labels demo campaigns as simulated instead of delivered', async () => {
+  const source = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
+  assert.match(source, /startsWith\('cmp_demo_'\).*SIMULATED/);
 });
 
 test('successful SES acceptance stores the provider message id and completes counters', async () => {

@@ -64,10 +64,14 @@ export function buildNotificationPayload({ template, channel, recipient, data, p
   return payload;
 }
 
-export function buildCampaignPayload({ template, channel, recipients, data, push }) {
+export function buildCampaignPayload({ template, channel, recipients, data, push, dltVariableMapping }) {
   validateChannel(channel);
   const payload = { template: template.trim(), channel, recipients: parseRecipients(channel, recipients), data };
   if (channel === 'push') payload.push = push;
+  if (channel === 'sms') {
+    if (!Array.isArray(dltVariableMapping) || !dltVariableMapping.length || dltVariableMapping.some((value) => typeof value !== 'string' || !value.trim())) throw new Error('SMS requires an ordered DLT variable mapping.');
+    payload.dltVariableMapping = dltVariableMapping.map((value) => value.trim());
+  }
   return payload;
 }
 

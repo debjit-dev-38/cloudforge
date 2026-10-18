@@ -742,6 +742,12 @@
         </div>
       </div>
 
+      <div id="cmp-dlt-fields" class="form-group hidden">
+        <label class="form-label" for="cmp-dlt-mapping">DLT Variable Mapping <span style="color:var(--error)">*</span></label>
+        <input class="form-input text-mono" id="cmp-dlt-mapping" placeholder="otp,name">
+        <p class="form-hint">Enter approved template variable names in exact order, comma-separated. Each name must exist in the JSON below.</p>
+      </div>
+
       <!-- Push content fields for campaign -->
       <div id="cmp-push-fields" class="hidden" style="display:flex;flex-direction:column;gap:14px;margin-bottom:18px;padding:16px;background:var(--surface-raised);border-radius:var(--r-btn);border:1px solid var(--border);">
         <span class="card-title" style="font-size:12px;">Push Broadcast Payload</span>

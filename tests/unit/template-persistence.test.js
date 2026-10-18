@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
-import { getTemplate, listTemplates, setStoreClientForTests } from '../../apps/api/src/store.js';
+import { ensureDefaultTemplates, getTemplate, listTemplates, setStoreClientForTests } from '../../apps/api/src/store.js';
 
 function fakeTemplateClient(items) {
   const byKey = new Map(items.map((item) => [`${item.PK}|${item.SK}`, item]));
@@ -9,6 +9,7 @@ function fakeTemplateClient(items) {
     calls: [],
     async send(command) {
       this.calls.push(command.input);
+      if (command.input.TransactItems) return {};
       if (command.input.Key) return { Item: byKey.get(`${command.input.Key.PK}|${command.input.Key.SK}`) };
       return { Items: items.filter((item) => item.PK === command.input.ExpressionAttributeValues[':pk'] && item.SK.startsWith('TEMPLATE#')) };
     },
@@ -53,6 +54,28 @@ test('template lookup is project-scoped and preserves draft versus published sta
   }
 });
 
+test('default templates seed idempotently without overwriting an existing custom slug', async () => {
+  const items = new Map();
+  const client = { calls: [], async send(command) {
+    this.calls.push(command.input);
+    if (command.input.Key) return { Item: items.get(`${command.input.Key.PK}|${command.input.Key.SK}`) };
+    for (const operation of command.input.TransactItems || []) {
+      const write = operation.Put;
+      if (write) items.set(`${write.Item.PK}|${write.Item.SK}`, write.Item);
+    }
+    return {};
+  } };
+  items.set('PROJECT#p1|TEMPLATE#otp-verification#CURRENT', { version: 4, state: 'draft' });
+  const restore = setStoreClientForTests(client);
+  try {
+    await ensureDefaultTemplates('p1');
+    await ensureDefaultTemplates('p1');
+    assert.equal([...items.keys()].filter(keyName => keyName.includes('TEMPLATE#')).length, 5);
+    assert.equal(items.get('PROJECT#p1|TEMPLATE#otp-verification#CURRENT').version, 4);
+    assert.equal(items.get('PROJECT#p1|TEMPLATE#welcome-onboarding#CURRENT').state, 'published');
+  } finally { restore(); }
+});
+
 test('template creation persists the version and current pointer in one project-scoped transaction', async () => {
   const dashboardApi = await fs.readFile(new URL('../../apps/api/src/dashboard-api.js', import.meta.url), 'utf8');
   assert.match(dashboardApi, /new TransactWriteCommand\(\{\s*TransactItems: \[\s*\{ Put: \{ TableName, Item: template/);
@@ -66,6 +89,8 @@ test('dashboard uses the persisted template endpoint and does not fall back to m
   assert.match(app, /sessionTemplates = \[\];\s+templateLoadError = friendlyError\(err\)/);
   assert.match(app, /case 'templates':\s+loadTemplates\(\)/);
   assert.match(app, /templates-refresh-btn.*loadTemplates/s);
+  for (const slug of ['welcome-onboarding', 'otp-verification', 'invoice-receipt']) assert.match(app, new RegExp(`slug: '${slug}'`));
+  assert.match(app, /if \(isDemoMode\) \{[\s\S]*sessionTemplates = \[\.\.\.MOCK_DATA\.templates\]/);
 });
 
 test('campaign lookup trims the slug and validates the current version as published', async () => {
@@ -110,4 +135,16 @@ test('new and edit template flows use explicit modes and separate HTTP operation
   assert.match(app, /templateMode = 'create';\s+editingTemplate = null/);
   assert.doesNotMatch(app, /addEventListener\('click', openTemplateModal\)/);
   assert.match(html, /id="template-modal-title">Create Template/);
+});
+
+test('template deletion has the required least-privilege permission and preserves safeguards', async () => {
+  const infra = await fs.readFile(new URL('../../infra/template.yaml', import.meta.url), 'utf8');
+  const dashboardApi = await fs.readFile(new URL('../../apps/api/src/dashboard-api.js', import.meta.url), 'utf8');
+  const app = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
+  assert.match(infra, /DashboardFunction:[\s\S]*?dynamodb:DeleteItem[\s\S]*?Resource: !GetAtt NotificationTable\.Arn/);
+  assert.match(dashboardApi, /if \(!current\) return respond\(404, \{ error: 'Template not found', code: 'TEMPLATE_NOT_FOUND' \}\)/);
+  assert.match(dashboardApi, /Key: \{ PK: key\.project\(projectId\), SK: key\.templateCurrent\(templateSlug\) \}/);
+  assert.match(dashboardApi, /ConditionExpression: 'attribute_exists\(PK\)'/);
+  assert.match(app, /await adminRequest\(`\/v1\/projects\/\$\{encodeURIComponent\(storedProjectId\(\)\)\}\/templates\/\$\{encodeURIComponent\(template\.slug\)\}`, 'DELETE'\)/);
+  assert.match(app, /await loadTemplates\(\);\s+toast\(`Template/);
 });

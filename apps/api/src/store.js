@@ -10,6 +10,7 @@ import {
   DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { createHash, randomUUID } from 'node:crypto';
+import { DEFAULT_TEMPLATES } from './default-templates.js';
 
 let client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
@@ -51,7 +52,25 @@ export async function getTemplateVersion(projectId, slug, version) {
   return get(key.project(projectId), key.template(slug, version));
 }
 
+export async function ensureDefaultTemplates(projectId) {
+  for (const definition of DEFAULT_TEMPLATES) {
+    const pointer = await get(key.project(projectId), key.templateCurrent(definition.slug));
+    if (pointer) continue;
+    const createdAt = now();
+    const template = { PK: key.project(projectId), SK: key.template(definition.slug, 1), projectId, slug: definition.slug, version: 1, state: 'published', subject: definition.subject, html: definition.html, text: definition.text, variables: definition.variables, createdAt };
+    try {
+      await client.send(new TransactWriteCommand({ TransactItems: [
+        { Put: { TableName, Item: template, ConditionExpression: 'attribute_not_exists(PK)' } },
+        { Put: { TableName, Item: { PK: key.project(projectId), SK: key.templateCurrent(definition.slug), version: 1, state: 'published' }, ConditionExpression: 'attribute_not_exists(PK)' } },
+      ] }));
+    } catch (error) {
+      if (error.name !== 'ConditionalCheckFailedException' && error.name !== 'TransactionCanceledException') throw error;
+    }
+  }
+}
+
 export async function listTemplates(projectId) {
+  await ensureDefaultTemplates(projectId);
   const pointers = [];
   let ExclusiveStartKey;
   do {

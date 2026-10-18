@@ -27,6 +27,11 @@ test('builds campaign payloads with one normalized channel and deduplicated reci
   assert.deepEqual(parseRecipients('sms', '+1 (415) 555-2671\n+14155552671'), ['+14155552671']);
 });
 
+test('requires and preserves ordered DLT variable mappings for SMS campaigns', () => {
+  assert.deepEqual(buildCampaignPayload({ template: 'otp', channel: 'sms', recipients: '+919876543210', data: { otp: '1234', name: 'Asha' }, dltVariableMapping: ['otp', 'name'] }).dltVariableMapping, ['otp', 'name']);
+  assert.throws(() => buildCampaignPayload({ template: 'otp', channel: 'sms', recipients: '+919876543210', data: { otp: '1234' }, dltVariableMapping: [] }), /DLT variable mapping/);
+});
+
 test('validates campaign limits, channel-specific recipients, and JSON', () => {
   assert.throws(() => parseRecipients('email', 'bad'), /valid recipient email/);
   assert.throws(() => parseRecipients('sms', '4155552671'), /E\.164/);

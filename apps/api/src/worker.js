@@ -2,6 +2,7 @@
 import { campaignQueueMessage, createDelivery, deliveryChannels, sanitizeProviderFailure, selectProvider } from './delivery.js';
 import { createSesEmailProvider } from './providers/ses-email-provider.js';
 import { createTwilioSmsProvider } from './providers/twilio-sms-provider.js';
+import { createFast2SmsProvider } from './providers/fast2sms-provider.js';
 import { createFcmPushProvider } from './providers/fcm-push-provider.js';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { renderTemplate } from './core.js';
@@ -25,7 +26,7 @@ export function setWorkerDependenciesForTests(overrides) {
 }
 
 function getSmsProvider() {
-  smsProvider ||= createTwilioSmsProvider();
+  smsProvider ||= process.env.SMS_PROVIDER === 'twilio' ? createTwilioSmsProvider() : createFast2SmsProvider();
   return smsProvider;
 }
 
@@ -63,7 +64,7 @@ async function processCampaignRecord({ projectId, campaignId }) {
     console.error(JSON.stringify({ event: 'campaign_provider_unavailable', projectId, campaignId, channel: current.channel, error: error.message }));
     return;
   }
-  const content = current.channel === deliveryChannels.push ? current.push : { subject: renderTemplate(template.subject, current.data), html: renderTemplate(template.html, current.data), text: renderTemplate(template.text || template.html.replace(/<[^>]+>/g, ''), current.data) };
+  const content = current.channel === deliveryChannels.push ? current.push : { subject: renderTemplate(template.subject, current.data), html: renderTemplate(template.html, current.data), text: renderTemplate(template.text || template.html.replace(/<[^>]+>/g, ''), current.data), data: current.data, dltVariableMapping: current.dltVariableMapping };
   for (const item of recipients) {
     const liveCampaign = await dependencies.getCampaign(projectId, campaignId);
     if (!liveCampaign || liveCampaign.state !== 'running') return;
@@ -76,6 +77,7 @@ async function processCampaignRecord({ projectId, campaignId }) {
     for (const target of targets) {
       const result = await provider.send({ delivery: { ...createDelivery({ notificationId: campaignId, projectId, organizationId: current.organizationId, recipient: target.token }, current.channel) }, content });
       if (result.outcome === 'success') { delivered = true; providerMessageId = result.providerMessageId; break; }
+      if (result.outcome === 'simulated') { failure = 'SIMULATED_MODE'; failureCode = 'SIMULATED_MODE'; break; }
       if (result.disableToken) await dependencies.disableDevice(projectId, item.recipient, target.token, result.errorCode);
       retryable ||= result.retryable; failure = result.errorMessage; failureCode = result.errorCode;
     }

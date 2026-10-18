@@ -52,6 +52,26 @@ Parameters:
     Type: String
     Default: ''
     Description: Optional Twilio sender number in E.164 format
+  SmsProvider:
+    Type: String
+    Default: fast2sms
+    AllowedValues: [fast2sms, twilio]
+  Fast2SmsApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+  Fast2SmsSenderId:
+    Type: String
+    Default: ''
+  Fast2SmsTemplateId:
+    Type: String
+    Default: ''
+  Fast2SmsMockMode:
+    Type: String
+    Default: 'true'
+  Fast2SmsTimeoutMs:
+    Type: String
+    Default: '8000'
 
 Globals:
   Function:
@@ -71,6 +91,12 @@ Globals:
         TWILIO_ACCOUNT_SID: !Ref TwilioAccountSid
         TWILIO_AUTH_TOKEN: !Ref TwilioAuthToken
         TWILIO_FROM_NUMBER: !Ref TwilioFromNumber
+        SMS_PROVIDER: !Ref SmsProvider
+        FAST2SMS_API_KEY: !Ref Fast2SmsApiKey
+        FAST2SMS_SENDER_ID: !Ref Fast2SmsSenderId
+        FAST2SMS_TEMPLATE_ID: !Ref Fast2SmsTemplateId
+        FAST2SMS_MOCK_MODE: !Ref Fast2SmsMockMode
+        FAST2SMS_TIMEOUT_MS: !Ref Fast2SmsTimeoutMs
         COGNITO_CLIENT_ID: !Ref UserPoolClient
         COGNITO_USER_POOL_ID: !Ref UserPool
         COGNITO_DOMAIN: !Sub https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
@@ -264,6 +290,7 @@ Resources:
             Action:
               - dynamodb:GetItem
               - dynamodb:PutItem
+              - dynamodb:DeleteItem
               - dynamodb:UpdateItem
               - dynamodb:Query
               - dynamodb:TransactWriteItems

@@ -3,7 +3,7 @@ import { PutCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { apiKeyHash, decodeCursor, encodeCursor, errorResponse, json, newId, parseJson, requestId, templateVariables } from './core.js';
-import { get, getProjectMembership, getTemplate, key, listNotifications, listTemplates, revokeApiKey } from './store.js';
+import { ensureDefaultTemplates, get, getProjectMembership, getTemplate, key, listNotifications, listTemplates, revokeApiKey } from './store.js';
 
 let client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
@@ -63,6 +63,7 @@ export async function handler(event) {
           },
         ],
       }));
+      await ensureDefaultTemplates(id);
       return respond(201, { projectId: id, organizationId });
     }
     if (!projectId || !(await authorizedProject(event, projectId))) return respond(404, { error: 'Project not found', code: 'PROJECT_NOT_FOUND' });

@@ -838,7 +838,7 @@ function renderCampaignsTable() {
           <div class="text-mono text-muted" style="font-size:11px;margin-top:2px;">${escHtml(c.campaignId)}</div>
         </td>
         <td>${channelChip(c.channel)}</td>
-        <td>${statusBadge(c.state)}</td>
+        <td>${c.campaignId?.startsWith('cmp_demo_') ? '<span class="badge badge-warning">SIMULATED</span>' : statusBadge(c.state)}</td>
         <td>${progressHtml(c)}</td>
         <td>
           <div style="font-weight:600;">${(c.total ?? 0).toLocaleString()}</div>
@@ -1457,6 +1457,7 @@ async function sendNotification() {
 // Campaign creation and device registration use the same session API key as dispatch.
 function updateCampaignChannel() {
   $('cmp-push-fields').classList.toggle('hidden', $('cmp-channel').value !== 'push');
+  $('cmp-dlt-fields').classList.toggle('hidden', $('cmp-channel').value !== 'sms');
   campaignSummaryReady = false;
   $('cmp-modal-submit').textContent = 'Review Campaign';
 }
@@ -1482,6 +1483,8 @@ function openCampaignModal() {
 function campaignFormPayload() {
   const channel = $('cmp-channel').value;
   const data = parseObjectJson($('cmp-data').value, 'Template variables data');
+  const dltVariableMapping = channel === 'sms' ? $('cmp-dlt-mapping').value.split(',').map(value => value.trim()).filter(Boolean) : undefined;
+  if (channel === 'sms' && dltVariableMapping.some(name => typeof data[name] !== 'string' || !data[name].length)) throw new Error('Every mapped DLT variable must exist as a non-empty string in Template Variables Data JSON.');
   const push = channel === 'push' ? buildPushPayload({
     title: $('cmp-push-title').value,
     body: $('cmp-push-body').value,
@@ -1494,6 +1497,7 @@ function campaignFormPayload() {
     recipients: $('cmp-recipients').value,
     data,
     push,
+    dltVariableMapping,
   });
 }
 
