@@ -251,7 +251,11 @@ const friendlyError = (err) => {
   if (err?.status === 401) return 'Session expired or not authenticated. Please log in.';
   if (err?.status === 403) return 'The signed-in user is not authorized for this project.';
   if (err?.status === 404) return err?.code === 'TEMPLATE_NOT_FOUND' ? 'Template not found; refresh the Templates page.' : 'The requested API resource was not found.';
-  if (err?.status === 409) return err?.code === 'TEMPLATE_VERSION_CONFLICT' ? 'This template changed elsewhere. Refresh it and try again.' : detail;
+  if (err?.status === 409) {
+    if (err?.code === 'TEMPLATE_VERSION_CONFLICT') return 'This template changed elsewhere. Refresh it and try again.';
+    if (err?.code === 'TEMPLATE_SLUG_EXISTS') return 'A template with this slug already exists. Edit it or choose a different slug.';
+    return detail;
+  }
   if (err?.kind === 'network') return `Could not reach the API for ${err.method} ${err.url}. This may be a network or CORS preflight failure; verify the API URL and that ${err.method} is allowed by the deployed API.`;
   if (/Published template not found/i.test(detail)) return 'Template not found or not published.';
   if (/valid email/i.test(detail)) return 'Enter a valid recipient email address.';

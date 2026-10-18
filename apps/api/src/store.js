@@ -52,6 +52,22 @@ export async function getTemplateVersion(projectId, slug, version) {
   return get(key.project(projectId), key.template(slug, version));
 }
 
+export async function listTemplateVersions(projectId, slug) {
+  const items = [];
+  let ExclusiveStartKey;
+  do {
+    const result = await client.send(new QueryCommand({
+      TableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      ExpressionAttributeValues: { ':pk': key.project(projectId), ':prefix': `TEMPLATE#${slug}#V` },
+      ExclusiveStartKey,
+    }));
+    items.push(...(result.Items || []));
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return items;
+}
+
 export async function ensureDefaultTemplates(projectId) {
   for (const definition of DEFAULT_TEMPLATES) {
     const pointer = await get(key.project(projectId), key.templateCurrent(definition.slug));

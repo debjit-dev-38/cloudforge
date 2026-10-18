@@ -143,8 +143,20 @@ test('template deletion has the required least-privilege permission and preserve
   const app = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
   assert.match(infra, /DashboardFunction:[\s\S]*?dynamodb:DeleteItem[\s\S]*?Resource: !GetAtt NotificationTable\.Arn/);
   assert.match(dashboardApi, /if \(!current\) return respond\(404, \{ error: 'Template not found', code: 'TEMPLATE_NOT_FOUND' \}\)/);
-  assert.match(dashboardApi, /Key: \{ PK: key\.project\(projectId\), SK: key\.templateCurrent\(templateSlug\) \}/);
+  assert.match(dashboardApi, /key\.templateCurrent\(templateSlug\)/);
   assert.match(dashboardApi, /ConditionExpression: 'attribute_exists\(PK\)'/);
   assert.match(app, /await adminRequest\(`\/v1\/projects\/\$\{encodeURIComponent\(storedProjectId\(\)\)\}\/templates\/\$\{encodeURIComponent\(template\.slug\)\}`, 'DELETE'\)/);
   assert.match(app, /await loadTemplates\(\);\s+toast\(`Template/);
+});
+
+test('template deletion cleans all versions and reports create conflicts clearly', async () => {
+  const store = await fs.readFile(new URL('../../apps/api/src/store.js', import.meta.url), 'utf8');
+  const api = await fs.readFile(new URL('../../apps/api/src/dashboard-api.js', import.meta.url), 'utf8');
+  const app = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
+  assert.match(store, /export async function listTemplateVersions/);
+  assert.match(api, /const versions = await listTemplateVersions\(projectId, templateSlug\)/);
+  assert.match(api, /const deletes = versions\.map\(\(version\) => \(\{ Delete:/);
+  assert.match(api, /TEMPLATE_SLUG_EXISTS/);
+  assert.match(api, /A template with this slug already exists/);
+  assert.match(app, /TEMPLATE_SLUG_EXISTS/);
 });

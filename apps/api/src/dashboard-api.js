@@ -3,7 +3,7 @@ import { PutCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { apiKeyHash, decodeCursor, encodeCursor, errorResponse, json, newId, parseJson, requestId, templateVariables } from './core.js';
-import { ensureDefaultTemplates, get, getProjectMembership, getTemplate, key, listNotifications, listTemplates, revokeApiKey } from './store.js';
+import { ensureDefaultTemplates, get, getProjectMembership, getTemplate, key, listNotifications, listTemplateVersions, listTemplates, revokeApiKey } from './store.js';
 
 let client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
@@ -106,20 +106,21 @@ export async function handler(event) {
     if ((method === 'PUT' || method === 'DELETE') && path.includes('/templates/')) {
       if (!/^[a-z0-9-]+$/.test(templateSlug || '')) return respond(400, { error: 'invalid template slug', code: 'INVALID_REQUEST' });
       const current = await getTemplate(projectId, templateSlug);
-      if (!current) return respond(404, { error: 'Template not found', code: 'TEMPLATE_NOT_FOUND' });
 
       if (method === 'DELETE') {
+        const versions = await listTemplateVersions(projectId, templateSlug);
+        const pointer = await get(key.project(projectId), key.templateCurrent(templateSlug));
+        if (!current && !pointer && versions.length === 0) return respond(404, { error: 'Template not found', code: 'TEMPLATE_NOT_FOUND' });
+        if (versions.length + 1 > 100) return respond(409, { error: 'Template has too many versions to delete in one operation', code: 'TEMPLATE_TOO_MANY_VERSIONS' });
+        const deletes = versions.map((version) => ({ Delete: { TableName, Key: { PK: version.PK, SK: version.SK } } }));
+        if (pointer) deletes.push({ Delete: { TableName, Key: { PK: key.project(projectId), SK: key.templateCurrent(templateSlug) }, ConditionExpression: 'attribute_exists(PK)' } });
         await client.send(new TransactWriteCommand({
-          TransactItems: [{
-            Delete: {
-              TableName,
-              Key: { PK: key.project(projectId), SK: key.templateCurrent(templateSlug) },
-              ConditionExpression: 'attribute_exists(PK)',
-            },
-          }],
+          TransactItems: deletes,
         }));
         return respond(200, { slug: templateSlug, deleted: true });
       }
+
+      if (!current) return respond(404, { error: 'Template not found', code: 'TEMPLATE_NOT_FOUND' });
 
       const body = parseJson(event.body);
       if (!Number.isInteger(body?.expectedVersion) || body.expectedVersion !== current.version) return respond(409, { error: 'Template changed; reload before editing', code: 'TEMPLATE_VERSION_CONFLICT' });
@@ -145,12 +146,17 @@ export async function handler(event) {
       if (![body.subject, body.html].every((value) => typeof value === 'string')) return respond(400, { error: 'subject and html are required', code: 'INVALID_REQUEST' });
       const version = 1;
       const template = { PK: key.project(projectId), SK: key.template(body.slug, version), projectId, slug: body.slug, version, state: body.state === 'published' ? 'published' : 'draft', subject: body.subject, html: body.html, text: body.text || '', variables: [...new Set([...templateVariables(body.subject), ...templateVariables(body.html), ...templateVariables(body.text || '')])], createdAt: new Date().toISOString() };
-      await client.send(new TransactWriteCommand({
-        TransactItems: [
-          { Put: { TableName, Item: template, ConditionExpression: 'attribute_not_exists(PK)' } },
-          { Put: { TableName, Item: { PK: key.project(projectId), SK: key.templateCurrent(body.slug), version, state: template.state }, ConditionExpression: 'attribute_not_exists(PK)' } },
-        ],
-      }));
+      try {
+        await client.send(new TransactWriteCommand({
+          TransactItems: [
+            { Put: { TableName, Item: template, ConditionExpression: 'attribute_not_exists(PK)' } },
+            { Put: { TableName, Item: { PK: key.project(projectId), SK: key.templateCurrent(body.slug), version, state: template.state }, ConditionExpression: 'attribute_not_exists(PK)' } },
+          ],
+        }));
+      } catch (error) {
+        if (error?.name === 'ConditionalCheckFailedException' || error?.name === 'TransactionCanceledException') return respond(409, { error: 'A template with this slug already exists. Choose a different slug or edit the existing template.', code: 'TEMPLATE_SLUG_EXISTS' });
+        throw error;
+      }
       return respond(201, { template });
     }
     if (method === 'GET' && path.endsWith('/templates')) {
