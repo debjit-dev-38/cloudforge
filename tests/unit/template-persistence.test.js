@@ -76,3 +76,22 @@ test('campaign lookup trims the slug and validates the current version as publis
   assert.match(campaignApi, /template\.state !== 'published'/);
   assert.match(store, /templateCurrent: \(slug\) => `TEMPLATE#\$\{slug\}#CURRENT`/);
 });
+
+test('template management uses project-authorized versioned update and pointer deletion routes', async () => {
+  const dashboardApi = await fs.readFile(new URL('../../apps/api/src/dashboard-api.js', import.meta.url), 'utf8');
+  const template = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
+  const infra = await fs.readFile(new URL('../../infra/template.yaml', import.meta.url), 'utf8');
+  assert.match(dashboardApi, /method === 'PUT' \|\| method === 'DELETE'/);
+  assert.match(dashboardApi, /TEMPLATE_VERSION_CONFLICT/);
+  assert.match(dashboardApi, /key\.template\(templateSlug, version\)/);
+  assert.match(dashboardApi, /key\.templateCurrent\(templateSlug\)/);
+  assert.match(dashboardApi, /method === 'DELETE'/);
+  assert.match(infra, /Path: "\/v1\/projects\/\{projectId\}\/templates\/\{templateSlug\}"[\s\S]*Method: PUT/);
+  assert.match(infra, /Path: "\/v1\/projects\/\{projectId\}\/templates\/\{templateSlug\}"[\s\S]*Method: DELETE/);
+  assert.match(template, /data-template-action="view"/);
+  assert.match(template, /data-template-action="edit"/);
+  assert.match(template, /data-template-action="delete"/);
+  assert.match(template, /adminRequest\(path, editingTemplate \? 'PUT' : 'POST'/);
+  assert.match(template, /Demo templates are read-only/);
+  assert.match(template, /sessionTemplates = \[\];\s+templateLoadError = friendlyError\(err\)/);
+});

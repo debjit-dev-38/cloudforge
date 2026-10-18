@@ -154,6 +154,8 @@ const MOCK_DATA = {
 
 let sessionTemplates = [];
 let templateLoadError = null;
+let editingTemplate = null;
+const deletingTemplateSlugs = new Set();
 
 // Notification history state & cursor
 let ntfNextCursor = null;
@@ -480,16 +482,18 @@ function fmtRelative(iso) {
 }
 
 function progressHtml(campaign) {
-  const pct = campaign.total > 0
-    ? Math.round((campaign.processed / campaign.total) * 100)
+  const total = Number.isFinite(campaign.total) ? campaign.total : 0;
+  const processed = Number.isFinite(campaign.processed) ? campaign.processed : 0;
+  const pct = total > 0
+    ? Math.round((processed / total) * 100)
     : 0;
-  const fillClass = campaign.failed > 0 && pct === 100 ? 'warning' : '';
+  const fillClass = (campaign.failed ?? 0) > 0 && pct === 100 ? 'warning' : '';
   return `
     <div style="min-width:100px;">
       <div class="progress-wrap">
         <div class="progress-fill ${fillClass}" style="width:${pct}%"></div>
       </div>
-      <span class="text-sm text-muted" style="margin-top:4px;display:block;font-size:12px;">${pct}% (${campaign.processed}/${campaign.total})</span>
+       <span class="text-sm text-muted" style="margin-top:4px;display:block;font-size:12px;">${pct}% (${processed}/${total})</span>
     </div>`;
 }
 
@@ -1162,7 +1166,39 @@ function renderTemplatesGrid() {
         ${(t.variables || []).map(v => `<span class="template-var">{{${escHtml(v)}}}</span>`).join('')}
       </div>
       <div class="text-sm text-muted" style="margin-top:4px;">v${t.version || 1} · Created ${fmtRelative(t.createdAt)}</div>
+      <div class="template-actions" style="display:flex;gap:8px;margin-top:14px;">
+        <button class="btn btn-secondary btn-sm" data-template-action="view" data-template-slug="${escHtml(t.slug)}">View</button>
+        <button class="btn btn-secondary btn-sm" data-template-action="edit" data-template-slug="${escHtml(t.slug)}" ${isDemoMode ? 'disabled title="Demo templates are read-only"' : ''}>Edit</button>
+        <button class="btn btn-danger btn-sm" data-template-action="delete" data-template-slug="${escHtml(t.slug)}" ${isDemoMode || deletingTemplateSlugs.has(t.slug) ? 'disabled title="Demo templates are read-only"' : ''}>${deletingTemplateSlugs.has(t.slug) ? 'Deleting…' : 'Delete'}</button>
+      </div>
     </div>`).join('');
+}
+
+function templateBySlug(slug) {
+  return sessionTemplates.find(template => template.slug === slug);
+}
+
+function openTemplateView(template) {
+  $('template-view-title').textContent = template.slug;
+  $('template-view-body').innerHTML = `<p><strong>Status:</strong> ${escHtml(template.state)}</p><p><strong>Version:</strong> ${escHtml(template.version || 1)}</p><p><strong>Subject:</strong> ${escHtml(template.subject)}</p><p><strong>HTML:</strong></p><pre style="white-space:pre-wrap;max-height:260px;overflow:auto;">${escHtml(template.html)}</pre>`;
+  $('template-view-modal').classList.add('open');
+}
+
+async function deleteTemplate(template) {
+  if (isDemoMode) { toast('Demo templates are read-only. Turn Demo Data off to manage persisted templates.', 'info'); return; }
+  if (!(await confirm('Delete Template', `Delete "${template.slug}"? Existing version history is retained for delivery records.`, 'Delete'))) return;
+  deletingTemplateSlugs.add(template.slug);
+  renderTemplatesGrid();
+  try {
+    await adminRequest(`/v1/projects/${encodeURIComponent(storedProjectId())}/templates/${encodeURIComponent(template.slug)}`, 'DELETE');
+    await loadTemplates();
+    toast(`Template "${template.slug}" deleted.`, 'success');
+  } catch (err) {
+    toast(friendlyError(err), 'error');
+  } finally {
+    deletingTemplateSlugs.delete(template.slug);
+    renderTemplatesGrid();
+  }
 }
 
 async function submitTemplate() {
@@ -1187,10 +1223,15 @@ async function submitTemplate() {
    btn.textContent = 'Saving…';
 
   try {
-    const data = await adminRequest(`/v1/projects/${projectId}/templates`, 'POST', { slug, subject, html, state });
+    const path = editingTemplate
+      ? `/v1/projects/${encodeURIComponent(projectId)}/templates/${encodeURIComponent(editingTemplate.slug)}`
+      : `/v1/projects/${encodeURIComponent(projectId)}/templates`;
+    const data = await adminRequest(path, editingTemplate ? 'PUT' : 'POST', editingTemplate
+      ? { subject, html, state, expectedVersion: editingTemplate.version }
+      : { slug, subject, html, state });
     await loadTemplates();
     closeTemplateModal();
-    toast(state === 'published' ? `Template "${slug}" published.` : `Template "${slug}" saved as a draft.`, 'success');
+    toast(editingTemplate ? `Template "${slug}" updated as ${state}.` : (state === 'published' ? `Template "${slug}" published.` : `Template "${slug}" saved as a draft.`), 'success');
 
     templateVariables = data.template.variables?.length ? data.template.variables : ['name'];
     renderSendFormVars();
@@ -1198,18 +1239,30 @@ async function submitTemplate() {
     $('tpl-error').textContent = friendlyError(err);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Create Template';
+    btn.textContent = editingTemplate ? 'Save Changes' : 'Create Template';
   }
 }
 
-function openTemplateModal() {
+function openTemplateModal(template = null) {
+  editingTemplate = template;
   $('tpl-error').textContent = '';
+  $('template-modal-title').textContent = template ? `Edit Template: ${template.slug}` : 'New Template';
+  $('tpl-modal-submit').textContent = template ? 'Save Changes' : 'Create Template';
+  $('tpl-slug').value = template?.slug || 'welcome';
+  $('tpl-slug').disabled = Boolean(template);
+  $('tpl-subject').value = template?.subject || 'Welcome, {{name}}';
+  $('tpl-html').value = template?.html || '<p>Hello {{name}}, welcome to our platform!</p>';
+  $('tpl-state').value = template?.state || 'published';
   $('template-modal').classList.add('open');
-  $('tpl-slug').focus();
+  (template ? $('tpl-subject') : $('tpl-slug')).focus();
 }
 
 function closeTemplateModal() {
   $('template-modal').classList.remove('open');
+  editingTemplate = null;
+  $('tpl-slug').disabled = false;
+  $('template-modal-title').textContent = 'New Template';
+  $('tpl-modal-submit').textContent = 'Create Template';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1608,10 +1661,21 @@ $('ntf-filter-channel').addEventListener('change', renderNtfTable);
 
 $('template-create-btn').addEventListener('click', openTemplateModal);
 $('templates-refresh-btn').addEventListener('click', loadTemplates);
+$('templates-grid').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-template-action]');
+  if (!button) return;
+  const template = templateBySlug(button.dataset.templateSlug);
+  if (!template) return;
+  if (button.dataset.templateAction === 'view') openTemplateView(template);
+  if (button.dataset.templateAction === 'edit' && !isDemoMode) openTemplateModal(template);
+  if (button.dataset.templateAction === 'delete' && !isDemoMode) deleteTemplate(template);
+});
 $('tpl-modal-submit').addEventListener('click', submitTemplate);
 $('tpl-modal-cancel').addEventListener('click', closeTemplateModal);
 $('template-modal-close').addEventListener('click', closeTemplateModal);
 $('template-modal').addEventListener('click', (e) => { if (e.target === $('template-modal')) closeTemplateModal(); });
+$('template-view-close').addEventListener('click', () => $('template-view-modal').classList.remove('open'));
+$('template-view-modal').addEventListener('click', (e) => { if (e.target === $('template-view-modal')) $('template-view-modal').classList.remove('open'); });
 
 $('proj-create-btn').addEventListener('click', createProject);
 $('proj-save-btn').addEventListener('click', saveProjectId);

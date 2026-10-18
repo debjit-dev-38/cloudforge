@@ -159,7 +159,24 @@ export async function getCampaign(projectId, campaignId) {
 }
 
 export async function listCampaigns(projectId, limit = 50) {
-  return client.send(new QueryCommand({ TableName, KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)', ExpressionAttributeValues: { ':pk': key.project(projectId), ':prefix': 'CAMPAIGN#' }, ScanIndexForward: false, Limit: Math.min(Math.max(limit, 1), 100) }));
+  const items = [];
+  const pageLimit = Math.min(Math.max(limit, 1), 100);
+  let ExclusiveStartKey;
+  do {
+    const result = await client.send(new QueryCommand({
+      TableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+      FilterExpression: 'attribute_not_exists(recipient)',
+      ExpressionAttributeValues: { ':pk': key.project(projectId), ':prefix': 'CAMPAIGN#' },
+      ScanIndexForward: false,
+      Limit: pageLimit,
+      ExclusiveStartKey,
+    }));
+    items.push(...(result.Items || []));
+    if (items.length >= pageLimit) return { Items: items.slice(0, pageLimit), LastEvaluatedKey: result.LastEvaluatedKey || null };
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return { Items: items, LastEvaluatedKey: null };
 }
 
 export async function claimCampaignRecipient(projectId, campaignId, recipient, leaseCutoff = new Date(Date.now() - 300000).toISOString()) {

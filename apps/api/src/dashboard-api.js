@@ -3,11 +3,17 @@ import { PutCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { apiKeyHash, decodeCursor, encodeCursor, errorResponse, json, newId, parseJson, requestId, templateVariables } from './core.js';
-import { get, getProjectMembership, key, listNotifications, listTemplates, revokeApiKey } from './store.js';
+import { get, getProjectMembership, getTemplate, key, listNotifications, listTemplates, revokeApiKey } from './store.js';
 
-const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+let client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
 const userId = (event) => event.requestContext?.authorizer?.jwt?.claims?.sub;
+
+export function setDashboardClientForTests(nextClient) {
+  const previous = client;
+  client = nextClient;
+  return () => { client = previous; };
+}
 
 async function authorizedProject(event, projectId) {
   const project = await get(key.project(projectId), 'META');
@@ -94,6 +100,43 @@ export async function handler(event) {
       if (!apiKey) return respond(404, { error: 'API key not found', code: 'API_KEY_NOT_FOUND' });
       await revokeApiKey(apiKey.hash);
       return respond(200, { keyId, revoked: true });
+    }
+    const templateSlug = event.pathParameters?.templateSlug;
+    if ((method === 'PUT' || method === 'DELETE') && path.includes('/templates/')) {
+      if (!/^[a-z0-9-]+$/.test(templateSlug || '')) return respond(400, { error: 'invalid template slug', code: 'INVALID_REQUEST' });
+      const current = await getTemplate(projectId, templateSlug);
+      if (!current) return respond(404, { error: 'Template not found', code: 'TEMPLATE_NOT_FOUND' });
+
+      if (method === 'DELETE') {
+        await client.send(new TransactWriteCommand({
+          TransactItems: [{
+            Delete: {
+              TableName,
+              Key: { PK: key.project(projectId), SK: key.templateCurrent(templateSlug) },
+              ConditionExpression: 'attribute_exists(PK)',
+            },
+          }],
+        }));
+        return respond(200, { slug: templateSlug, deleted: true });
+      }
+
+      const body = parseJson(event.body);
+      if (!Number.isInteger(body?.expectedVersion) || body.expectedVersion !== current.version) return respond(409, { error: 'Template changed; reload before editing', code: 'TEMPLATE_VERSION_CONFLICT' });
+      if (![body?.subject, body?.html].every((value) => typeof value === 'string')) return respond(400, { error: 'subject and html are required', code: 'INVALID_REQUEST' });
+      if (body.state !== undefined && body.state !== 'published' && body.state !== 'draft') return respond(400, { error: 'state must be published or draft', code: 'INVALID_REQUEST' });
+      if (body.text !== undefined && typeof body.text !== 'string') return respond(400, { error: 'text must be a string', code: 'INVALID_REQUEST' });
+      const version = current.version + 1;
+      const text = body.text === undefined ? (current.text || '') : body.text;
+      const state = body.state === undefined ? current.state : body.state;
+      const updatedAt = new Date().toISOString();
+      const template = { PK: key.project(projectId), SK: key.template(templateSlug, version), projectId, slug: templateSlug, version, state, subject: body.subject, html: body.html, text, variables: [...new Set([...templateVariables(body.subject), ...templateVariables(body.html), ...templateVariables(text)])], createdAt: updatedAt };
+      await client.send(new TransactWriteCommand({
+        TransactItems: [
+          { Put: { TableName, Item: template, ConditionExpression: 'attribute_not_exists(PK)' } },
+          { Update: { TableName, Key: { PK: key.project(projectId), SK: key.templateCurrent(templateSlug) }, UpdateExpression: 'SET #version = :version, #state = :state, updatedAt = :updatedAt', ConditionExpression: '#version = :expectedVersion', ExpressionAttributeNames: { '#version': 'version', '#state': 'state' }, ExpressionAttributeValues: { ':version': version, ':state': state, ':updatedAt': updatedAt, ':expectedVersion': current.version } } },
+        ],
+      }));
+      return respond(200, { template });
     }
     if (method === 'POST' && path.endsWith('/templates')) {
       const body = parseJson(event.body);

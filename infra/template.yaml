@@ -322,6 +322,24 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
 
+        UpdateTemplate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/projects/{projectId}/templates/{templateSlug}"
+            Method: PUT
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+        DeleteTemplate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/v1/projects/{projectId}/templates/{templateSlug}"
+            Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
+
         ListNotifications:
           Type: HttpApi
           Properties:
