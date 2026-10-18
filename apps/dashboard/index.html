@@ -437,6 +437,8 @@
               <select class="form-select" id="project-selector"><option value="">Loading authorized projects…</option></select>
               <p class="form-hint" id="project-selector-status">Projects are loaded from your authorized Cognito session.</p>
             </div>
+            <button class="btn btn-danger" id="proj-delete-btn" style="width:100%;" disabled>Delete Selected Project</button>
+            <p class="form-hint">Deletion is blocked while the project contains campaigns, notifications, templates, API keys, devices, or other records.</p>
             <div class="form-group">
               <label class="form-label" for="proj-id-input">Project ID</label>
               <input class="form-input text-mono" id="proj-id-input" placeholder="prj-…" autocomplete="off">

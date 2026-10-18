@@ -1,5 +1,5 @@
 // Authenticated dashboard API Lambda handler.
-import { PutCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, PutCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { apiKeyHash, decodeCursor, encodeCursor, errorResponse, json, newId, parseJson, requestId, templateVariables } from './core.js';
@@ -76,6 +76,32 @@ export async function handler(event) {
       return respond(200, body);
     }
     if (!projectId || !(await authorizedProject(event, projectId))) return respond(404, { error: 'Project not found', code: 'PROJECT_NOT_FOUND' });
+
+    if (method === 'DELETE' && path === `/v1/projects/${projectId}`) {
+      const project = await get(key.project(projectId), 'META');
+      if (!project) return respond(404, { error: 'Project not found', code: 'PROJECT_NOT_FOUND' });
+      let ExclusiveStartKey;
+      do {
+        const result = await client.send(new QueryCommand({
+          TableName,
+          KeyConditionExpression: 'PK = :pk',
+          FilterExpression: 'SK <> :meta',
+          ExpressionAttributeValues: { ':pk': key.project(projectId), ':meta': 'META' },
+          ProjectionExpression: 'SK',
+          Limit: 25,
+          ExclusiveStartKey,
+        }));
+        if ((result.Items || []).length) return respond(409, { error: 'Project has dependent resources and cannot be deleted.', code: 'PROJECT_HAS_DEPENDENCIES' });
+        ExclusiveStartKey = result.LastEvaluatedKey;
+      } while (ExclusiveStartKey);
+      await client.send(new DeleteCommand({
+        TableName,
+        Key: { PK: key.project(projectId), SK: 'META' },
+        ConditionExpression: 'attribute_exists(PK) AND organizationId = :organizationId',
+        ExpressionAttributeValues: { ':organizationId': project.organizationId },
+      }));
+      return respond(200, { projectId, deleted: true });
+    }
 
     if (method === 'POST' && path.endsWith('/api-keys')) {
       const body = parseJson(event.body);

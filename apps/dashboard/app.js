@@ -248,6 +248,7 @@ async function loadAuthorizedProjects() {
     const selected = authorizedProjects.some((project) => project.projectId === saved) ? saved : authorizedProjects[0]?.projectId || '';
     selector.innerHTML = authorizedProjects.length ? authorizedProjects.map((project) => `<option value="${escHtml(project.projectId)}">${escHtml(project.name || project.projectId)}</option>`).join('') : '<option value="">No authorized projects</option>';
     selector.value = selected;
+    $('proj-delete-btn').disabled = !selected;
     if (selected !== saved) {
       if (selected) sessionStorage.setItem(SESSION.projectId, selected); else sessionStorage.removeItem(SESSION.projectId);
       sessionStorage.removeItem(SESSION.apiKey);
@@ -1375,6 +1376,33 @@ async function createProject() {
   }
 }
 
+async function deleteProject() {
+  const projectId = storedProjectId();
+  const project = authorizedProjects.find((item) => item.projectId === projectId);
+  if (!project || !projectId) return;
+  if (!(await confirm('Delete Project', `Delete project "${project.name || projectId}" (${projectId})? This cannot be undone.`, 'Delete Project'))) return;
+  const button = $('proj-delete-btn');
+  button.disabled = true;
+  button.textContent = 'Deleting…';
+  $('proj-error').textContent = '';
+  try {
+    await adminRequest(`/v1/projects/${encodeURIComponent(projectId)}`, 'DELETE');
+    authorizedProjects = authorizedProjects.filter((item) => item.projectId !== projectId);
+    sessionStorage.removeItem(SESSION.projectId);
+    sessionStorage.removeItem(SESSION.apiKey);
+    sessionStorage.removeItem(SESSION.apiKeyProjectId);
+    await loadAuthorizedProjects();
+    $('proj-success-msg').textContent = `Project "${project.name || projectId}" was deleted.`;
+    $('proj-success').classList.remove('hidden');
+    toast('Project deleted successfully.', 'success');
+  } catch (err) {
+    $('proj-error').textContent = friendlyError(err);
+    button.disabled = false;
+  } finally {
+    button.textContent = 'Delete Selected Project';
+  }
+}
+
 function saveProjectId() {
   const id = $('proj-id-input').value.trim();
   if (!id) { toast('Please enter a Project ID.', 'error'); return; }
@@ -1765,6 +1793,7 @@ $('template-view-modal').addEventListener('click', (e) => { if (e.target === $('
 
 $('proj-create-btn').addEventListener('click', createProject);
 $('proj-save-btn').addEventListener('click', saveProjectId);
+$('proj-delete-btn').addEventListener('click', deleteProject);
 $('key-create-btn').addEventListener('click', createApiKey);
 $('key-copy-btn').addEventListener('click', async () => {
   const val = $('key-reveal-value').textContent;

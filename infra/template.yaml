@@ -312,6 +312,11 @@ Resources:
               - dynamodb:Query
               - dynamodb:TransactWriteItems
             Resource: !GetAtt NotificationTable.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:Query
+            Resource: !Sub '${NotificationTable.Arn}/index/OrganizationProjectsIndex'
       Events:
         CreateProject:
           Type: HttpApi
@@ -327,6 +332,14 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /v1/projects
             Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+        DeleteProject:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/projects/{projectId}
+            Method: DELETE
             Auth:
               Authorizer: CognitoAuthorizer
 

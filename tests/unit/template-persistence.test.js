@@ -192,6 +192,10 @@ test('authorized project listing is Cognito-scoped and dashboard selection rejec
   assert.match(store, /IndexName: 'OrganizationProjectsIndex'/);
   assert.match(store, /FilterExpression: 'SK = :meta'/);
   assert.match(infra, /OrganizationProjectsIndex/);
+  assert.match(infra, /DashboardFunction:[\s\S]*?OrganizationProjectsIndex[\s\S]*?dynamodb:Query/);
+  assert.match(infra, /Path: \/v1\/projects\/\{projectId\}[\s\S]*?Method: DELETE/);
+  assert.match(api, /PROJECT_HAS_DEPENDENCIES/);
+  assert.match(app, /Delete Selected Project/);
   assert.match(app, /adminRequest\('\/v1\/projects'\)/);
   assert.match(app, /authorizedProjects\.some\(\(project\) => project\.projectId === saved\)/);
   assert.match(app, /sessionTemplates = \[\];\s+campaignsData = \[\];\s+ntfAllItems = \[\]/);
