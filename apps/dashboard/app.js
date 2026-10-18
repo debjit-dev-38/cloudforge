@@ -746,14 +746,22 @@ function renderOverviewNtfTable(items) {
 
 async function loadOverviewCampaigns(hasKey) {
   const container = $('overview-campaigns-list');
+  const projectId = storedProjectId();
+  const apiKeyProjectId = storedApiKeyProjectId();
   if (!hasKey) {
     container.innerHTML = `<div class="state-empty" style="padding:16px 0;"><h3>API key required</h3><p>Configure an API key in Project & Keys to inspect active campaigns.</p></div>`;
     $('stat-campaigns').textContent = '—';
     return;
   }
+  if (!projectId || (apiKeyProjectId && apiKeyProjectId !== projectId)) {
+    container.innerHTML = `<div class="state-empty" style="padding:16px 0;"><h3>Project API key mismatch</h3><p>Select the project that owns this API key, or configure a project-specific key.</p></div>`;
+    $('stat-campaigns').textContent = '—';
+    return;
+  }
   try {
     const data = await apiKeyRequest('/v1/campaigns');
-    const campaigns = data.items || [];
+    if (!Array.isArray(data.items)) throw { error: 'The campaign list response was invalid.', status: 502, kind: 'http' };
+    const campaigns = data.items.filter(c => !c.projectId || c.projectId === projectId);
     const active = campaigns.filter(c => ['queued','running','paused'].includes(c.state));
     $('stat-campaigns').textContent = active.length.toLocaleString();
 

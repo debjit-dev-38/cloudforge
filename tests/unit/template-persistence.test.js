@@ -160,3 +160,12 @@ test('template deletion cleans all versions and reports create conflicts clearly
   assert.match(api, /A template with this slug already exists/);
   assert.match(app, /TEMPLATE_SLUG_EXISTS/);
 });
+
+test('overview campaign metrics use the selected project key and fail visibly on invalid data', async () => {
+  const app = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const apiKeyProjectId = storedApiKeyProjectId\(\)/);
+  assert.match(app, /apiKeyProjectId && apiKeyProjectId !== projectId/);
+  assert.match(app, /The campaign list response was invalid/);
+  assert.match(app, /c\.projectId === projectId/);
+  assert.match(app, /\['queued','running','paused'\]\.includes\(c\.state\)/);
+});
