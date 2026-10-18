@@ -11,6 +11,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { createHash, randomUUID } from 'node:crypto';
 import { DEFAULT_TEMPLATES } from './default-templates.js';
+import { ApiError } from './core.js';
 
 let client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
@@ -41,6 +42,51 @@ export async function getApiKey(hash) {
 
 export async function getProjectMembership(userId, organizationId) {
   return get(key.user(userId), `MEMBERSHIP#${organizationId}`);
+}
+
+export async function listAuthorizedProjects(userId, limit = 50, exclusiveStartKey) {
+  const pageLimit = Math.min(Math.max(limit, 1), 100);
+  const cursor = exclusiveStartKey;
+  if (cursor && (cursor.PK !== key.user(userId) || cursor.SK !== 'ORG_PROJECTS' || !Array.isArray(cursor.organizationIds) || !Number.isInteger(cursor.organizationIndex) || cursor.organizationIndex < 0 || cursor.organizationIndex > cursor.organizationIds.length)) throw new ApiError(400, 'INVALID_CURSOR', 'cursor must be a valid project pagination cursor');
+  const organizationIds = cursor?.organizationIds || await listUserOrganizationIds(userId);
+  let organizationIndex = cursor?.organizationIndex || 0;
+  let projectCursor = cursor?.projectCursor;
+  const projects = [];
+  const seen = new Set();
+  while (organizationIndex < organizationIds.length && projects.length < pageLimit) {
+    const result = await client.send(new QueryCommand({
+      TableName,
+      IndexName: 'OrganizationProjectsIndex',
+      KeyConditionExpression: 'organizationId = :organizationId',
+      FilterExpression: 'SK = :meta',
+      ExpressionAttributeValues: { ':organizationId': organizationIds[organizationIndex], ':meta': 'META' },
+      ScanIndexForward: true,
+      Limit: pageLimit - projects.length,
+      ExclusiveStartKey: projectCursor,
+    }));
+    for (const project of result.Items || []) {
+      if (!seen.has(project.projectId)) {
+        seen.add(project.projectId);
+        projects.push({ projectId: project.projectId, name: project.name, organizationId: project.organizationId, createdAt: project.createdAt });
+      }
+    }
+    if (result.LastEvaluatedKey) { projectCursor = result.LastEvaluatedKey; break; }
+    organizationIndex += 1;
+    projectCursor = undefined;
+  }
+  const hasMore = Boolean(projectCursor) || organizationIndex < organizationIds.length;
+  return { projects, LastEvaluatedKey: hasMore ? { PK: key.user(userId), SK: 'ORG_PROJECTS', organizationIds, organizationIndex, projectCursor: projectCursor || null } : null };
+}
+
+async function listUserOrganizationIds(userId) {
+  const organizationIds = new Set();
+  let ExclusiveStartKey;
+  do {
+    const result = await client.send(new QueryCommand({ TableName, KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)', ExpressionAttributeValues: { ':pk': key.user(userId), ':prefix': 'MEMBERSHIP#' }, ExclusiveStartKey }));
+    for (const item of result.Items || []) if (typeof item.organizationId === 'string' && item.organizationId) organizationIds.add(item.organizationId);
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return [...organizationIds].sort();
 }
 
 export async function getTemplate(projectId, slug) {

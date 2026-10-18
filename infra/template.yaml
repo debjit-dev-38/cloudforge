@@ -111,11 +111,28 @@ Resources:
           AttributeType: S
         - AttributeName: SK
           AttributeType: S
+        - AttributeName: organizationId
+          AttributeType: S
+        - AttributeName: projectId
+          AttributeType: S
       KeySchema:
         - AttributeName: PK
           KeyType: HASH
         - AttributeName: SK
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: OrganizationProjectsIndex
+          KeySchema:
+            - AttributeName: organizationId
+              KeyType: HASH
+            - AttributeName: projectId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - name
+              - ownerUserId
+              - createdAt
       TimeToLiveSpecification:
         AttributeName: expiresAt
         Enabled: true
@@ -302,6 +319,14 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /v1/projects
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+        ListProjects:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /v1/projects
+            Method: GET
             Auth:
               Authorizer: CognitoAuthorizer
 

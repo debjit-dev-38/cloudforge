@@ -164,6 +164,8 @@ let ntfAllItems = [...MOCK_DATA.notifications];
 
 // Campaigns raw data
 let campaignsData = [...MOCK_DATA.campaigns];
+let authorizedProjects = [];
+let projectLoadSequence = 0;
 let campaignPollTimer = null;
 let sessionDevices = [];
 let campaignSummaryReady = false;
@@ -231,6 +233,49 @@ async function adminRequest(path, method = 'GET', body) {
     if (err?.kind === 'http' || err?.status) throw err;
     throw { kind: 'network', method, url, cause: err };
   }
+}
+
+async function loadAuthorizedProjects() {
+  const sequence = ++projectLoadSequence;
+  const selector = $('project-selector');
+  if (!selector || !accessToken()) return;
+  selector.disabled = true;
+  try {
+    const data = await adminRequest('/v1/projects');
+    if (sequence !== projectLoadSequence) return;
+    authorizedProjects = Array.isArray(data.projects) ? data.projects : [];
+    const saved = storedProjectId();
+    const selected = authorizedProjects.some((project) => project.projectId === saved) ? saved : authorizedProjects[0]?.projectId || '';
+    selector.innerHTML = authorizedProjects.length ? authorizedProjects.map((project) => `<option value="${escHtml(project.projectId)}">${escHtml(project.name || project.projectId)}</option>`).join('') : '<option value="">No authorized projects</option>';
+    selector.value = selected;
+    if (selected !== saved) {
+      if (selected) sessionStorage.setItem(SESSION.projectId, selected); else sessionStorage.removeItem(SESSION.projectId);
+      sessionStorage.removeItem(SESSION.apiKey);
+      sessionStorage.removeItem(SESSION.apiKeyProjectId);
+    }
+    selector.disabled = false;
+    $('project-selector-status').textContent = authorizedProjects.length ? 'Select an authorized project to view its data.' : 'No authorized projects are available.';
+    updateAuthUi();
+  } catch (err) {
+    if (sequence !== projectLoadSequence) return;
+    selector.innerHTML = '<option value="">Projects unavailable</option>';
+    selector.disabled = false;
+    $('project-selector-status').textContent = friendlyError(err);
+  }
+}
+
+async function switchProject(projectId) {
+  if (!authorizedProjects.some((project) => project.projectId === projectId)) return;
+  sessionStorage.setItem(SESSION.projectId, projectId);
+  sessionStorage.removeItem(SESSION.apiKey);
+  sessionStorage.removeItem(SESSION.apiKeyProjectId);
+  sessionTemplates = [];
+  campaignsData = [];
+  ntfAllItems = [];
+  updateAuthUi();
+  loadTemplates();
+  loadNotifications();
+  loadOverview();
 }
 
 async function apiKeyRequest(path, method = 'GET', body) {
@@ -1670,6 +1715,7 @@ $('sidebar-auth-action').addEventListener('click', () => {
 });
 
 $('overview-refresh-btn').addEventListener('click', loadOverview);
+$('project-selector')?.addEventListener('change', (event) => switchProject(event.target.value));
 $('overview-login-btn').addEventListener('click', () => {
   loadOAuthConfig().then(triggerLogin).catch(err => toast(friendlyError(err), 'error'));
 });
@@ -1804,6 +1850,7 @@ $('api-url-input').addEventListener('change', () => {
     await pingApi();
     if (!oauthConfig) await loadOAuthConfig();
     await completeLogin();
+    await loadAuthorizedProjects();
   } catch (err) {
     console.warn('Boot initialization warning:', err?.message ?? err);
     toast(friendlyError(err), 'error');

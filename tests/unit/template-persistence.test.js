@@ -180,3 +180,19 @@ test('overview exposes total and completed campaign metrics without changing act
   assert.match(app, /Number\(c\.failed\)/);
   assert.match(app, /active = campaigns\.filter\(c => \['queued','running','paused'\]\.includes\(c\.state\)\)/);
 });
+
+test('authorized project listing is Cognito-scoped and dashboard selection rejects stale projects', async () => {
+  const api = await fs.readFile(new URL('../../apps/api/src/dashboard-api.js', import.meta.url), 'utf8');
+  const store = await fs.readFile(new URL('../../apps/api/src/store.js', import.meta.url), 'utf8');
+  const infra = await fs.readFile(new URL('../../infra/template.yaml', import.meta.url), 'utf8');
+  const app = await fs.readFile(new URL('../../apps/dashboard/app.js', import.meta.url), 'utf8');
+  assert.match(api, /method === 'GET' && path === '\/v1\/projects'/);
+  assert.match(api, /listAuthorizedProjects\(userId\(event\)/);
+  assert.match(store, /begins_with\(SK, :prefix\)/);
+  assert.match(store, /IndexName: 'OrganizationProjectsIndex'/);
+  assert.match(store, /FilterExpression: 'SK = :meta'/);
+  assert.match(infra, /OrganizationProjectsIndex/);
+  assert.match(app, /adminRequest\('\/v1\/projects'\)/);
+  assert.match(app, /authorizedProjects\.some\(\(project\) => project\.projectId === saved\)/);
+  assert.match(app, /sessionTemplates = \[\];\s+campaignsData = \[\];\s+ntfAllItems = \[\]/);
+});

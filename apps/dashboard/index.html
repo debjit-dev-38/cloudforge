@@ -433,6 +433,11 @@
           <div class="card">
             <div class="card-header"><span class="card-title">Project Configuration</span></div>
             <div class="form-group">
+              <label class="form-label" for="project-selector">Authorized Project</label>
+              <select class="form-select" id="project-selector"><option value="">Loading authorized projects…</option></select>
+              <p class="form-hint" id="project-selector-status">Projects are loaded from your authorized Cognito session.</p>
+            </div>
+            <div class="form-group">
               <label class="form-label" for="proj-id-input">Project ID</label>
               <input class="form-input text-mono" id="proj-id-input" placeholder="prj-…" autocomplete="off">
               <p class="form-hint">Enter your existing project identifier or register a new one below.</p>

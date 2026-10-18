@@ -3,7 +3,7 @@ import { PutCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { apiKeyHash, decodeCursor, encodeCursor, errorResponse, json, newId, parseJson, requestId, templateVariables } from './core.js';
-import { ensureDefaultTemplates, get, getProjectMembership, getTemplate, key, listNotifications, listTemplateVersions, listTemplates, revokeApiKey } from './store.js';
+import { ensureDefaultTemplates, get, getProjectMembership, getTemplate, key, listAuthorizedProjects, listNotifications, listTemplateVersions, listTemplates, revokeApiKey } from './store.js';
 
 let client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
@@ -57,7 +57,7 @@ export async function handler(event) {
           {
             Put: {
               TableName,
-              Item: { PK: key.user(userId(event)), SK: `MEMBERSHIP#${organizationId}`, userId: userId(event), organizationId, role: 'owner', createdAt },
+              Item: { PK: key.user(userId(event)), SK: `MEMBERSHIP#${organizationId}`, userId: userId(event), organizationId, projectId: id, role: 'owner', createdAt },
               ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
             },
           },
@@ -65,6 +65,15 @@ export async function handler(event) {
       }));
       await ensureDefaultTemplates(id);
       return respond(201, { projectId: id, organizationId });
+    }
+    if (method === 'GET' && path === '/v1/projects') {
+      const limitValue = event.queryStringParameters?.limit;
+      const limit = limitValue === undefined ? 50 : Number(limitValue);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) return respond(400, { error: 'limit must be an integer between 1 and 100', code: 'INVALID_REQUEST' });
+      const projects = await listAuthorizedProjects(userId(event), limit, decodeCursor(event.queryStringParameters?.cursor));
+      const body = { projects: projects.projects };
+      if (projects.LastEvaluatedKey) body.nextCursor = encodeCursor(projects.LastEvaluatedKey);
+      return respond(200, body);
     }
     if (!projectId || !(await authorizedProject(event, projectId))) return respond(404, { error: 'Project not found', code: 'PROJECT_NOT_FOUND' });
 
