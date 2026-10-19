@@ -46,7 +46,7 @@ const SESSION = {
 let oauthConfig = null;
 let templateVariables = ['name'];
 
-/** Demo Mode — enabled by default so users can immediately experience Ember Studio */
+/** Demo Mode — controlled explicitly by the deployed dashboard configuration. */
 let isDemoMode = window.NOTIFICATION_MVP_CONFIG?.demoMode === true;
 
 const MOCK_DATA = {
@@ -500,6 +500,15 @@ function updateAuthUi() {
       : 'Not signed in. Log in to create projects, templates, and API keys.';
     $('settings-login-btn').classList.toggle('hidden', signedIn);
     $('settings-logout-btn').classList.toggle('hidden', !signedIn);
+  }
+
+  function updateDemoUi() {
+    const label = $('demo-toggle-label');
+    const button = $('demo-toggle-btn');
+    if (!label || !button) return;
+    label.textContent = `Demo Data: ${isDemoMode ? 'ON' : 'OFF'}`;
+    button.classList.toggle('btn-primary', isDemoMode);
+    button.classList.toggle('btn-secondary', !isDemoMode);
   }
 
   if ($('key-session-status')) {
@@ -1871,9 +1880,7 @@ $('settings-clear-btn').addEventListener('click', async () => {
 // Demo toggle button
 $('demo-toggle-btn').addEventListener('click', () => {
   isDemoMode = !isDemoMode;
-  $('demo-toggle-label').textContent = `Demo Data: ${isDemoMode ? 'ON' : 'OFF'}`;
-  $('demo-toggle-btn').classList.toggle('btn-primary', isDemoMode);
-  $('demo-toggle-btn').classList.toggle('btn-secondary', !isDemoMode);
+  updateDemoUi();
   toast(`Demo Mode ${isDemoMode ? 'enabled' : 'disabled'}.`, 'info');
   // Refresh current view
   const activePage = document.querySelector('.page.active')?.id?.replace('page-', '') || 'overview';
@@ -1909,6 +1916,7 @@ $('api-url-input').addEventListener('change', () => {
   updateCampaignChannel();
   renderDevices();
   updateAuthUi();
+  updateDemoUi();
 
   try {
     await pingApi();

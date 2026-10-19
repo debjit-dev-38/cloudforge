@@ -21,9 +21,11 @@ EventBridge Scheduler is a managed AWS service and may incur schedule invocation
 ```powershell
 pnpm install
 sam validate --template-file infra/template.yaml
-sam build --template-file infra/template.yaml
-sam deploy
+pnpm build
+sam deploy --template-file .aws-sam/build/template.yaml --config-file samconfig.toml --config-env default
 ```
+
+Always deploy the built template. Deploying `infra/template.yaml` directly from a pnpm workspace can omit transitive AWS SDK packages from Lambda artifacts and cause `Runtime.ImportModuleError` failures.
 
 Do not deploy to production without reviewing parameter overrides and IAM changes.
 
