@@ -47,3 +47,33 @@ test('valid campaign API keys resolve to the owning project', async () => {
   );
   assert.deepEqual(result, { projectId: 'project-1', organizationId: 'org-1', maxPerMinute: 60 });
 });
+
+test('validates scheduled campaign timestamps and normalizes them to UTC', async () => {
+  const { validateScheduledAt } = await import('../../apps/api/src/campaign-api.js');
+  assert.equal(validateScheduledAt('2099-01-02T03:04:05+05:30'), '2099-01-01T21:34:05.000Z');
+  assert.throws(() => validateScheduledAt('2099-01-02T03:04:05'), /explicit timezone/);
+  assert.throws(() => validateScheduledAt('2000-01-02T03:04:05Z'), /future/);
+});
+
+test('scheduled start is conditional and ignores cancelled or duplicate invocations', async () => {
+  const { startCampaign, setCampaignStartDependenciesForTests } = await import('../../apps/api/src/campaign-api.js');
+  const updates = [];
+  const messages = [];
+  const restore = setCampaignStartDependenciesForTests({
+    getCampaign: async () => ({ campaignId: 'cmp_1', projectId: 'prj_1', state: 'scheduled', scheduledAt: '2000-01-01T00:00:00.000Z' }),
+    updateCampaignState: async (...args) => updates.push(args),
+    sqs: { send: async (message) => messages.push(message) },
+  });
+  try {
+    assert.deepEqual(await startCampaign({ projectId: 'prj_1', campaignId: 'cmp_1' }), { started: true, campaignId: 'cmp_1' });
+    assert.equal(updates.length, 1);
+    assert.equal(messages.length, 1);
+  } finally { restore(); }
+
+  const cancelledRestore = setCampaignStartDependenciesForTests({
+    getCampaign: async () => ({ state: 'cancelled', scheduledAt: '2000-01-01T00:00:00.000Z' }),
+  });
+  try {
+    assert.deepEqual(await startCampaign({ projectId: 'prj_1', campaignId: 'cmp_1' }), { started: false, reason: 'not-eligible' });
+  } finally { cancelledRestore(); }
+});

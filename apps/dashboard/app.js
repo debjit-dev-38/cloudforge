@@ -21,6 +21,7 @@ import {
   buildCampaignPayload,
   buildNotificationPayload,
   buildPushPayload,
+  buildScheduledAt,
   maskToken,
   parseObjectJson,
   validateRecipient,
@@ -900,9 +901,9 @@ function renderCampaignsTable() {
   }
 
   $('campaigns-tbody').innerHTML = filtered.map(c => {
-    const canPause  = ['queued','running'].includes(c.state);
+    const canPause  = ['scheduled','queued','running'].includes(c.state);
     const canResume = c.state === 'paused';
-    const canCancel = ['queued','running','paused'].includes(c.state);
+    const canCancel = ['scheduled','queued','running','paused'].includes(c.state);
 
     return `
       <tr data-campaign-id="${escHtml(c.campaignId)}" style="cursor:pointer;" title="Click to view details">
@@ -920,7 +921,7 @@ function renderCampaignsTable() {
             <span style="color:var(--error)">${(c.failed ?? 0).toLocaleString()} err</span>
           </div>
         </td>
-        <td class="text-muted text-sm">${fmtDate(c.createdAt)}</td>
+        <td class="text-muted text-sm">${c.scheduledAt ? `<strong>Scheduled</strong><br>${fmtDate(c.scheduledAt)}` : fmtDate(c.createdAt)}</td>
         <td style="text-align:right;">
           <div style="display:flex;gap:6px;justify-content:flex-end;" onclick="event.stopPropagation()">
             ${canPause  ? `<button class="btn btn-secondary btn-sm campaign-action-btn" data-id="${escHtml(c.campaignId)}" data-action="pause" aria-label="Pause campaign">Pause</button>` : ''}
@@ -998,7 +999,7 @@ async function openCampaignDetail(campaignId) {
   try {
     const c = await apiKeyRequest(`/v1/campaigns/${campaignId}`);
     renderCampaignDetail(c);
-    if (['queued', 'running'].includes(c.state)) {
+    if (['scheduled', 'queued', 'running'].includes(c.state)) {
       clearInterval(campaignPollTimer);
       campaignPollTimer = setInterval(() => openCampaignDetail(campaignId), 10000);
     }
@@ -1012,13 +1013,13 @@ function renderCampaignDetail(c) {
 
   const actions = $('campaign-detail-actions');
   actions.innerHTML = '';
-  if (['queued','running'].includes(c.state)) {
+  if (['scheduled','queued','running'].includes(c.state)) {
     actions.append(el('button', { className:'btn btn-secondary btn-sm', onclick: () => handleDetailAction(c.campaignId, 'pause') }, text('Pause')));
   }
   if (c.state === 'paused') {
     actions.append(el('button', { className:'btn btn-primary btn-sm', onclick: () => handleDetailAction(c.campaignId, 'resume') }, text('Resume')));
   }
-  if (['queued','running','paused'].includes(c.state)) {
+  if (['scheduled','queued','running','paused'].includes(c.state)) {
     actions.append(el('button', { className:'btn btn-danger btn-sm', onclick: () => handleDetailAction(c.campaignId, 'cancel') }, text('Cancel')));
   }
   const refreshBtn = el('button', { className:'btn btn-secondary btn-sm', 'aria-label':'Refresh', onclick: () => openCampaignDetail(c.campaignId) });
@@ -1079,6 +1080,7 @@ function renderCampaignDetail(c) {
         <div class="flex gap-12"><span class="text-muted" style="min-width:140px;">Project ID</span><span class="text-mono">${escHtml(c.projectId || '—')}</span></div>
         <div class="flex gap-12"><span class="text-muted" style="min-width:140px;">Template Slug</span><span class="text-mono">${escHtml(c.templateSlug || '—')} (v${escHtml(String(c.templateVersion ?? 1))})</span></div>
         <div class="flex gap-12"><span class="text-muted" style="min-width:140px;">Created Date</span><span>${escHtml(fmtDate(c.createdAt))}</span></div>
+        ${c.scheduledAt ? `<div class="flex gap-12"><span class="text-muted" style="min-width:140px;">Scheduled Start</span><span>${escHtml(fmtDate(c.scheduledAt))} (${escHtml(Intl.DateTimeFormat().resolvedOptions().timeZone)})</span></div>` : ''}
         <div class="flex gap-12"><span class="text-muted" style="min-width:140px;">Last Updated</span><span>${escHtml(fmtDate(c.updatedAt))}</span></div>
       </div>
     </div>`;
@@ -1569,12 +1571,22 @@ function updateCampaignChannel() {
   $('cmp-modal-submit').textContent = 'Review Campaign';
 }
 
+function updateCampaignSchedule() {
+  const enabled = $('cmp-schedule-enabled').checked;
+  $('cmp-schedule-fields').classList.toggle('hidden', !enabled);
+  $('cmp-timezone').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  campaignSummaryReady = false;
+  $('cmp-modal-submit').textContent = 'Review Campaign';
+}
+
 function closeCampaignModal() {
   $('campaign-modal').classList.remove('open');
   $('cmp-error').textContent = '';
   $('cmp-summary').classList.add('hidden');
   campaignSummaryReady = false;
   $('cmp-modal-submit').textContent = 'Create & Launch Campaign';
+  $('cmp-schedule-enabled').checked = false;
+  updateCampaignSchedule();
 }
 
 function openCampaignModal() {
@@ -1582,6 +1594,7 @@ function openCampaignModal() {
   $('cmp-summary').classList.add('hidden');
   campaignSummaryReady = false;
   $('cmp-modal-submit').textContent = 'Review Campaign';
+  updateCampaignSchedule();
   updateCampaignChannel();
   $('campaign-modal').classList.add('open');
   $('cmp-template').focus();
@@ -1598,6 +1611,9 @@ function campaignFormPayload() {
     deepLink: $('cmp-push-deeplink').value,
     data: parseObjectJson($('cmp-push-data').value, 'Push custom data'),
   }) : undefined;
+  const scheduledAt = $('cmp-schedule-enabled').checked
+    ? buildScheduledAt($('cmp-start-date').value, $('cmp-start-time').value)
+    : undefined;
   return buildCampaignPayload({
     template: $('cmp-template').value,
     channel,
@@ -1605,13 +1621,17 @@ function campaignFormPayload() {
     data,
     push,
     dltVariableMapping,
+    scheduledAt,
   });
 }
 
 function showCampaignSummary() {
   try {
     const body = campaignFormPayload();
-    $('cmp-summary-content').innerHTML = `<strong>Ready to launch</strong><br>${body.recipients.length.toLocaleString()} unique ${escHtml(body.channel)} recipients will receive <span class="text-mono">${escHtml(body.template)}</span>.`;
+    const schedule = body.scheduledAt
+      ? `<br><strong>Scheduled:</strong> ${escHtml(fmtDate(body.scheduledAt))} (${escHtml(Intl.DateTimeFormat().resolvedOptions().timeZone)})`
+      : '<br>Delivery will begin immediately.';
+    $('cmp-summary-content').innerHTML = `<strong>${body.scheduledAt ? 'Ready to schedule' : 'Ready to launch'}</strong><br>${body.recipients.length.toLocaleString()} unique ${escHtml(body.channel)} recipients will receive <span class="text-mono">${escHtml(body.template)}</span>.${schedule}`;
     $('cmp-summary').classList.remove('hidden');
     $('cmp-error').textContent = '';
     return body;
@@ -1626,7 +1646,7 @@ async function submitCampaign() {
   if (!campaignSummaryReady) {
     if (showCampaignSummary()) {
       campaignSummaryReady = true;
-      $('cmp-modal-submit').textContent = 'Confirm & Launch';
+      $('cmp-modal-submit').textContent = $('cmp-schedule-enabled').checked ? 'Confirm & Schedule' : 'Confirm & Launch';
     }
     return;
   }
@@ -1638,19 +1658,21 @@ async function submitCampaign() {
   }
   const button = $('cmp-modal-submit');
   button.disabled = true;
-  button.textContent = 'Launching...';
+  button.textContent = body.scheduledAt ? 'Scheduling...' : 'Launching...';
   try {
     let result;
     if (isDemoMode) {
       const campaignId = `cmp_demo_${Date.now()}`;
       const now = new Date().toISOString();
-      result = { campaignId, state: 'queued', total: body.recipients.length };
-      campaignsData.unshift({ campaignId, projectId: 'prj_ember_studio_demo', templateSlug: body.template, templateVersion: 1, channel: body.channel, state: result.state, total: result.total, processed: 0, successful: 0, failed: 0, pending: result.total, createdAt: now, updatedAt: now });
+      result = { campaignId, state: body.scheduledAt ? 'scheduled' : 'queued', scheduledAt: body.scheduledAt, total: body.recipients.length };
+      campaignsData.unshift({ campaignId, projectId: 'prj_ember_studio_demo', templateSlug: body.template, templateVersion: 1, channel: body.channel, state: result.state, scheduledAt: result.scheduledAt, total: result.total, processed: 0, successful: 0, failed: 0, pending: result.total, createdAt: now, updatedAt: now });
     } else {
       result = await apiKeyRequest('/v1/campaigns', 'POST', body);
     }
     closeCampaignModal();
-    toast(`Campaign ${result.campaignId} queued for ${result.total.toLocaleString()} recipients.`, 'success');
+    toast(result.state === 'scheduled'
+      ? `Campaign ${result.campaignId} scheduled for ${fmtDate(result.scheduledAt)}.`
+      : `Campaign ${result.campaignId} queued for ${result.total.toLocaleString()} recipients.`, 'success');
     await loadCampaigns();
   } catch (err) {
     $('cmp-error').textContent = friendlyError(err);
@@ -1763,6 +1785,7 @@ $('overview-login-btn').addEventListener('click', () => {
 $('campaigns-refresh-btn').addEventListener('click', loadCampaigns);
 $('campaign-create-btn').addEventListener('click', openCampaignModal);
 $('cmp-channel').addEventListener('change', updateCampaignChannel);
+$('cmp-schedule-enabled').addEventListener('change', updateCampaignSchedule);
 $('campaign-modal').querySelectorAll('input, textarea, select').forEach(field => {
   field.addEventListener('input', () => {
     campaignSummaryReady = false;

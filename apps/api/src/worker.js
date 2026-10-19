@@ -41,7 +41,7 @@ function providerConfigurationError(error) {
 
 async function processCampaignRecord({ projectId, campaignId }) {
   const campaign = await dependencies.getCampaign(projectId, campaignId);
-  if (!campaign || campaign.state === 'paused' || campaign.state === 'cancelled' || campaign.state === 'completed') return;
+  if (!campaign || campaign.state === 'scheduled' || campaign.state === 'paused' || campaign.state === 'cancelled' || campaign.state === 'completed') return;
   if (campaign.state === 'queued') {
     try { await dependencies.updateCampaignState(projectId, campaignId, 'queued', 'running'); } catch (error) { if (error.name !== 'ConditionalCheckFailedException') throw error; }
   }

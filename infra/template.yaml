@@ -250,6 +250,10 @@ Resources:
     Properties:
       CodeUri: ../apps/api/
       Handler: src/campaign-api.handler
+      Environment:
+        Variables:
+          SCHEDULER_ROLE_ARN: !GetAtt CampaignSchedulerRole.Arn
+          START_CAMPAIGN_FUNCTION_ARN: !GetAtt StartCampaignFunction.Arn
       Policies:
         - Statement:
             Effect: Allow
@@ -260,6 +264,16 @@ Resources:
               - dynamodb:Query
               - dynamodb:TransactWriteItems
             Resource: !GetAtt NotificationTable.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - scheduler:CreateSchedule
+            Resource: !Sub 'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/*'
+        - Statement:
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt CampaignSchedulerRole.Arn
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DeliveryQueue.QueueName
       Events:
@@ -295,6 +309,40 @@ Resources:
             Method: POST
             Auth:
               Authorizer: NONE
+
+  CampaignSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeStartCampaign
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt StartCampaignFunction.Arn
+
+  StartCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../apps/api/
+      Handler: src/campaign-api.startCampaignHandler
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+            Resource: !GetAtt NotificationTable.Arn
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DeliveryQueue.QueueName
 
   DashboardFunction:
     Type: AWS::Serverless::Function

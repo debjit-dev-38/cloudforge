@@ -268,6 +268,7 @@
           </div>
           <select class="form-select" style="width:auto;" id="campaigns-filter-status" aria-label="Filter by status">
             <option value="">All statuses</option>
+            <option value="scheduled">Scheduled</option>
             <option value="queued">Queued</option>
             <option value="running">Running</option>
             <option value="paused">Paused</option>
@@ -291,7 +292,7 @@
                 <th>Status</th>
                 <th>Progress</th>
                 <th>Recipients</th>
-                <th>Created</th>
+                <th>Start / Created</th>
                 <th style="text-align:right;">Actions</th>
               </tr>
             </thead>
@@ -795,6 +796,24 @@
         <label class="form-label" for="cmp-data">Template Variables Data JSON <span style="color:var(--error)">*</span></label>
         <textarea class="form-input form-textarea" id="cmp-data" style="min-height:90px;" placeholder='{"name": "Valued Customer", "offer": "20% off"}' required>{"name": "Valued Member"}</textarea>
         <p class="form-hint">Shared variables JSON passed to template for rendering each notification.</p>
+      </div>
+
+      <div class="form-group" style="padding:16px;background:var(--surface-raised);border-radius:var(--r-btn);border:1px solid var(--border);">
+        <div class="flex items-center gap-8" style="margin-bottom:12px;">
+          <input type="checkbox" id="cmp-schedule-enabled">
+          <label class="form-label" for="cmp-schedule-enabled" style="margin:0;">Schedule this campaign for later</label>
+        </div>
+        <div id="cmp-schedule-fields" class="hidden" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div>
+            <label class="form-label" for="cmp-start-date">Start date</label>
+            <input class="form-input" id="cmp-start-date" type="date">
+          </div>
+          <div>
+            <label class="form-label" for="cmp-start-time">Start time</label>
+            <input class="form-input" id="cmp-start-time" type="time">
+          </div>
+          <p class="form-hint" style="grid-column:1/-1;margin:0;">Timezone: <span id="cmp-timezone"></span>. Your campaign will start automatically at the scheduled time. You do not need to keep this page open.</p>
+        </div>
       </div>
 
       <!-- Confirmation / validation preview summary -->

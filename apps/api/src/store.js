@@ -225,9 +225,9 @@ export async function createCampaign({ campaign, recipients }) {
         TableName,
         Key: { PK: key.project(campaign.projectId), SK: key.campaign(campaign.campaignId) },
         UpdateExpression: 'SET #state = :failed, failureReason = :reason, updatedAt = :updatedAt',
-        ConditionExpression: '#state = :queued',
+        ConditionExpression: '#state = :queued OR #state = :scheduled',
         ExpressionAttributeNames: { '#state': 'state' },
-        ExpressionAttributeValues: { ':queued': 'queued', ':failed': 'failed', ':reason': 'Campaign recipient initialization failed', ':updatedAt': now() },
+        ExpressionAttributeValues: { ':queued': 'queued', ':scheduled': 'scheduled', ':failed': 'failed', ':reason': 'Campaign recipient initialization failed', ':updatedAt': now() },
       }));
     } catch (markFailedError) {
       console.error(JSON.stringify({ event: 'campaign_initialization_failure_unrecorded', projectId: campaign.projectId, campaignId: campaign.campaignId, errorName: markFailedError.name }));

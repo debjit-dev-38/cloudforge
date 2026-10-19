@@ -4,6 +4,7 @@ import {
   buildCampaignPayload,
   buildNotificationPayload,
   buildPushPayload,
+  buildScheduledAt,
   maskToken,
   parseObjectJson,
   parseRecipients,
@@ -43,4 +44,18 @@ test('validates campaign limits, channel-specific recipients, and JSON', () => {
 
 test('masks device tokens without exposing the full token', () => {
   assert.equal(maskToken('abcdefghijklmnopqrstuvwxyz'), 'abcd...wxyz');
+});
+
+test('converts future local schedule input to UTC and rejects stale input', () => {
+  const scheduledAt = buildScheduledAt('2099-01-02', '03:04', Date.parse('2099-01-01T00:00:00Z'));
+  assert.equal(scheduledAt, new Date('2099-01-02T03:04').toISOString());
+  assert.throws(() => buildScheduledAt('2020-01-02', '03:04', Date.parse('2020-01-02T03:05:00Z')), /future/);
+  assert.throws(() => buildScheduledAt('', '', Date.now()), /date and time/);
+});
+
+test('includes an optional schedule without changing immediate campaign payloads', () => {
+  const immediate = buildCampaignPayload({ template: 'welcome', channel: 'email', recipients: 'a@example.com', data: {} });
+  assert.equal('scheduledAt' in immediate, false);
+  const scheduled = buildCampaignPayload({ template: 'welcome', channel: 'email', recipients: 'a@example.com', data: {}, scheduledAt: '2099-01-02T03:04:00.000Z' });
+  assert.equal(scheduled.scheduledAt, '2099-01-02T03:04:00.000Z');
 });

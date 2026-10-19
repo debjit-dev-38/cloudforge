@@ -64,7 +64,7 @@ export function buildNotificationPayload({ template, channel, recipient, data, p
   return payload;
 }
 
-export function buildCampaignPayload({ template, channel, recipients, data, push, dltVariableMapping }) {
+export function buildCampaignPayload({ template, channel, recipients, data, push, dltVariableMapping, scheduledAt }) {
   validateChannel(channel);
   const payload = { template: template.trim(), channel, recipients: parseRecipients(channel, recipients), data };
   if (channel === 'push') payload.push = push;
@@ -72,7 +72,17 @@ export function buildCampaignPayload({ template, channel, recipients, data, push
     if (!Array.isArray(dltVariableMapping) || !dltVariableMapping.length || dltVariableMapping.some((value) => typeof value !== 'string' || !value.trim())) throw new Error('SMS requires an ordered DLT variable mapping.');
     payload.dltVariableMapping = dltVariableMapping.map((value) => value.trim());
   }
+
+  if (scheduledAt) payload.scheduledAt = scheduledAt;
   return payload;
+}
+
+export function buildScheduledAt(date, time, now = Date.now()) {
+  if (!date || !time) throw new Error('Choose a start date and time.');
+  const parsed = new Date(`${date}T${time}`);
+  if (Number.isNaN(parsed.getTime())) throw new Error('Choose a valid start date and time.');
+  if (parsed.getTime() <= now) throw new Error('Scheduled start must be in the future.');
+  return parsed.toISOString();
 }
 
 export function maskToken(token) {
