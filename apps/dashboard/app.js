@@ -1,7 +1,7 @@
 /**
- * Ember Studio — Notification Infrastructure Platform Dashboard
+ * CloudForge — Notification Infrastructure Platform Dashboard
  * Browser-only SPA. Native ES Modules. No build step.
- * Strictly adheres to design.md / Ember Studio design system.
+ * Strictly adheres to design.md / CloudForge design system.
  *
  * Verified API surface:
  *   GET  /v1/dashboard-config                               (public)
@@ -125,7 +125,7 @@ const MOCK_DATA = {
   templates: [
     {
       slug: 'welcome-onboarding',
-      subject: 'Welcome to Ember Studio, {{name}}',
+      subject: 'Welcome to CloudForge, {{name}}',
       html: '<p>Welcome {{name}}, your account is now ready.</p>',
       state: 'published',
       variables: ['name', 'companyName'],
@@ -586,7 +586,7 @@ function campaignTiming(campaign) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Visualizations (Ember Studio SVG Charts)
+// Visualizations (CloudForge SVG Charts)
 // ─────────────────────────────────────────────────────────────────────────────
 function renderDeliveryAreaChart(notifications) {
   const container = $('overview-chart-wrap');
@@ -1382,7 +1382,7 @@ async function createProject() {
   const signedIn = Boolean(accessToken());
   if (!signedIn) { toast('Please sign in with Cognito first.', 'error'); return; }
 
-  const name = $('proj-name-input').value.trim() || 'Ember Workspace';
+  const name = $('proj-name-input').value.trim() || 'CloudForge Workspace';
   $('proj-error').textContent = '';
   $('proj-success').classList.add('hidden');
   $('proj-create-btn').disabled = true;
