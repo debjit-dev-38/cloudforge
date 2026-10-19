@@ -2,6 +2,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
+  BatchWriteCommand,
   GetCommand,
   PutCommand,
   UpdateCommand,
@@ -119,11 +120,11 @@ export async function ensureDefaultTemplates(projectId) {
     const pointer = await get(key.project(projectId), key.templateCurrent(definition.slug));
     if (pointer) continue;
     const createdAt = now();
-    const template = { PK: key.project(projectId), SK: key.template(definition.slug, 1), projectId, slug: definition.slug, version: 1, state: 'published', subject: definition.subject, html: definition.html, text: definition.text, variables: definition.variables, createdAt };
+    const template = { PK: key.project(projectId), SK: key.template(definition.slug, 1), projectId, slug: definition.slug, source: definition.source, version: 1, state: 'published', subject: definition.subject, html: definition.html, text: definition.text, variables: definition.variables, createdAt };
     try {
       await client.send(new TransactWriteCommand({ TransactItems: [
         { Put: { TableName, Item: template, ConditionExpression: 'attribute_not_exists(PK)' } },
-        { Put: { TableName, Item: { PK: key.project(projectId), SK: key.templateCurrent(definition.slug), version: 1, state: 'published' }, ConditionExpression: 'attribute_not_exists(PK)' } },
+        { Put: { TableName, Item: { PK: key.project(projectId), SK: key.templateCurrent(definition.slug), source: definition.source, version: 1, state: 'published' }, ConditionExpression: 'attribute_not_exists(PK)' } },
       ] }));
     } catch (error) {
       if (error.name !== 'ConditionalCheckFailedException' && error.name !== 'TransactionCanceledException') throw error;
@@ -369,4 +370,65 @@ export async function revokeApiKey(hash) {
     UpdateExpression: 'SET revokedAt = :revokedAt',
     ExpressionAttributeValues: { ':revokedAt': now() },
   }));
+}
+
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function deleteBatch(requests) {
+  for (let offset = 0; offset < requests.length; offset += 25) {
+    await deleteBatchChunk(requests.slice(offset, offset + 25));
+  }
+}
+
+async function deleteBatchChunk(requests) {
+  let pending = requests;
+  for (let attempt = 0; pending.length; attempt += 1) {
+    try {
+      const result = await client.send(new BatchWriteCommand({ RequestItems: { [TableName]: pending } }));
+      pending = result.UnprocessedItems?.[TableName] || [];
+    } catch (error) {
+      const retryable = ['ProvisionedThroughputExceededException', 'ThrottlingException', 'InternalServerError', 'ServiceUnavailable'].includes(error?.name);
+      if (!retryable || attempt >= 7) {
+        if (retryable) throw new ApiError(503, 'PROJECT_CLEANUP_FAILED', 'Project cleanup could not complete because DynamoDB kept throttling the deletion.', { cause: error });
+        throw error;
+      }
+    }
+    if (pending.length) {
+      if (attempt >= 7) throw new ApiError(503, 'PROJECT_CLEANUP_FAILED', 'Project cleanup could not complete because DynamoDB kept throttling the deletion.');
+      await sleep(Math.min(1000, 25 * (2 ** attempt)));
+    }
+  }
+}
+
+async function listProjectItems(projectId) {
+  const items = [];
+  let ExclusiveStartKey;
+  do {
+    const result = await client.send(new QueryCommand({
+      TableName,
+      KeyConditionExpression: 'PK = :pk',
+      ExpressionAttributeValues: { ':pk': key.project(projectId) },
+      ProjectionExpression: 'PK, SK, #hash, projectId',
+      ExpressionAttributeNames: { '#hash': 'hash' },
+      ExclusiveStartKey,
+    }));
+    items.push(...(result.Items || []));
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return items;
+}
+
+export async function deleteProjectData(projectId) {
+  for (let round = 0; round < 5; round += 1) {
+    const items = await listProjectItems(projectId);
+    const owned = items.filter((item) => item.SK !== 'META');
+    if (!owned.length) return;
+    const requests = owned.map((item) => ({ DeleteRequest: { Key: { PK: item.PK, SK: item.SK } } }));
+    const apiKeyRequests = owned
+      .filter((item) => item.SK.startsWith('APIKEY#') && item.projectId === projectId && typeof item.hash === 'string')
+      .map((item) => ({ DeleteRequest: { Key: { PK: key.apiKey(item.hash), SK: 'META' } } }));
+    await deleteBatch([...requests, ...apiKeyRequests]);
+  }
+  const remaining = (await listProjectItems(projectId)).filter((item) => item.SK !== 'META');
+  if (remaining.length) throw new ApiError(503, 'PROJECT_CLEANUP_FAILED', 'Project cleanup did not remove all project-owned records. Retry the deletion.');
 }

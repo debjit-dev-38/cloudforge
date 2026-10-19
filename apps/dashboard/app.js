@@ -1385,7 +1385,7 @@ async function deleteProject() {
   const projectId = storedProjectId();
   const project = authorizedProjects.find((item) => item.projectId === projectId);
   if (!project || !projectId) return;
-  if (!(await confirm('Delete Project', `Delete project "${project.name || projectId}" (${projectId})? This cannot be undone.`, 'Delete Project'))) return;
+  if (!(await confirm('Delete Project', `Permanently delete project "${project.name || projectId}" (${projectId}) and all campaigns, notifications, delivery history, API keys, devices, custom templates, and template history? The built-in invoice-receipt, otp-verification, and welcome-onboarding templates will remain available to other projects. This cannot be undone.`, 'Delete Project'))) return;
   const button = $('proj-delete-btn');
   button.disabled = true;
   button.textContent = 'Deleting…';
@@ -1396,7 +1396,14 @@ async function deleteProject() {
     sessionStorage.removeItem(SESSION.projectId);
     sessionStorage.removeItem(SESSION.apiKey);
     sessionStorage.removeItem(SESSION.apiKeyProjectId);
+    sessionTemplates = [];
+    campaignsData = [];
+    ntfAllItems = [];
+    sessionDevices = [];
+    updateAuthUi();
     await loadAuthorizedProjects();
+    const nextProjectId = storedProjectId();
+    if (nextProjectId) await switchProject(nextProjectId);
     $('proj-success-msg').textContent = `Project "${project.name || projectId}" was deleted.`;
     $('proj-success').classList.remove('hidden');
     toast('Project deleted successfully.', 'success');

@@ -1,9 +1,9 @@
 // Authenticated dashboard API Lambda handler.
-import { DeleteCommand, PutCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { apiKeyHash, decodeCursor, encodeCursor, errorResponse, json, newId, parseJson, requestId, templateVariables } from './core.js';
-import { ensureDefaultTemplates, get, getProjectMembership, getTemplate, key, listAuthorizedProjects, listNotifications, listTemplateVersions, listTemplates, revokeApiKey } from './store.js';
+import { deleteProjectData, ensureDefaultTemplates, get, getProjectMembership, getTemplate, key, listAuthorizedProjects, listNotifications, listTemplateVersions, listTemplates, revokeApiKey } from './store.js';
 
 let client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TableName = process.env.TABLE_NAME;
@@ -18,6 +18,7 @@ export function setDashboardClientForTests(nextClient) {
 async function authorizedProject(event, projectId) {
   const project = await get(key.project(projectId), 'META');
   if (!project) return undefined;
+  if (project.deletionState === 'deleting' && event.requestContext?.http?.method !== 'DELETE') return undefined;
   if (project.ownerUserId === userId(event)) return project;
   const membership = await getProjectMembership(userId(event), project.organizationId);
   return membership ? project : undefined;
@@ -80,28 +81,22 @@ export async function handler(event) {
     if (method === 'DELETE' && path === `/v1/projects/${projectId}`) {
       const project = await get(key.project(projectId), 'META');
       if (!project) return respond(404, { error: 'Project not found', code: 'PROJECT_NOT_FOUND' });
-      let ExclusiveStartKey;
-      do {
-        const result = await client.send(new QueryCommand({
-          TableName,
-          KeyConditionExpression: 'PK = :pk',
-          ExpressionAttributeValues: { ':pk': key.project(projectId) },
-          ProjectionExpression: 'SK',
-          Limit: 25,
-          ExclusiveStartKey,
-        }));
-        if ((result.Items || []).some((item) => item.SK !== 'META')) {
-          return respond(409, { error: 'Project has dependent resources and cannot be deleted.', code: 'PROJECT_HAS_DEPENDENCIES' });
-        }
-        ExclusiveStartKey = result.LastEvaluatedKey;
-      } while (ExclusiveStartKey);
+      if (project.ownerUserId !== userId(event)) return respond(403, { error: 'Only the project owner can delete this project.', code: 'PROJECT_DELETE_FORBIDDEN' });
+      await client.send(new UpdateCommand({
+        TableName,
+        Key: { PK: key.project(projectId), SK: 'META' },
+        UpdateExpression: 'SET deletionState = :deleting',
+        ConditionExpression: 'attribute_exists(PK) AND organizationId = :organizationId AND (attribute_not_exists(deletionState) OR deletionState = :deleting)',
+        ExpressionAttributeValues: { ':organizationId': project.organizationId, ':deleting': 'deleting' },
+      }));
+      await deleteProjectData(projectId);
       await client.send(new DeleteCommand({
         TableName,
         Key: { PK: key.project(projectId), SK: 'META' },
-        ConditionExpression: 'attribute_exists(PK) AND organizationId = :organizationId',
-        ExpressionAttributeValues: { ':organizationId': project.organizationId },
+        ConditionExpression: 'attribute_exists(PK) AND organizationId = :organizationId AND deletionState = :deleting',
+        ExpressionAttributeValues: { ':organizationId': project.organizationId, ':deleting': 'deleting' },
       }));
-      return respond(200, { projectId, deleted: true });
+      return respond(200, { projectId, deleted: true, deletedProjectData: true });
     }
 
     if (method === 'POST' && path.endsWith('/api-keys')) {
@@ -167,7 +162,7 @@ export async function handler(event) {
       const text = body.text === undefined ? (current.text || '') : body.text;
       const state = body.state === undefined ? current.state : body.state;
       const updatedAt = new Date().toISOString();
-      const template = { PK: key.project(projectId), SK: key.template(templateSlug, version), projectId, slug: templateSlug, version, state, subject: body.subject, html: body.html, text, variables: [...new Set([...templateVariables(body.subject), ...templateVariables(body.html), ...templateVariables(text)])], createdAt: updatedAt };
+      const template = { PK: key.project(projectId), SK: key.template(templateSlug, version), projectId, slug: templateSlug, source: current.source || 'custom', version, state, subject: body.subject, html: body.html, text, variables: [...new Set([...templateVariables(body.subject), ...templateVariables(body.html), ...templateVariables(text)])], createdAt: updatedAt };
       await client.send(new TransactWriteCommand({
         TransactItems: [
           { Put: { TableName, Item: template, ConditionExpression: 'attribute_not_exists(PK)' } },
@@ -181,12 +176,12 @@ export async function handler(event) {
       if (!/^[a-z0-9-]+$/.test(body?.slug || '')) return respond(400, { error: 'slug must contain lowercase letters, digits, and hyphens', code: 'INVALID_REQUEST' });
       if (![body.subject, body.html].every((value) => typeof value === 'string')) return respond(400, { error: 'subject and html are required', code: 'INVALID_REQUEST' });
       const version = 1;
-      const template = { PK: key.project(projectId), SK: key.template(body.slug, version), projectId, slug: body.slug, version, state: body.state === 'published' ? 'published' : 'draft', subject: body.subject, html: body.html, text: body.text || '', variables: [...new Set([...templateVariables(body.subject), ...templateVariables(body.html), ...templateVariables(body.text || '')])], createdAt: new Date().toISOString() };
+      const template = { PK: key.project(projectId), SK: key.template(body.slug, version), projectId, slug: body.slug, source: 'custom', version, state: body.state === 'published' ? 'published' : 'draft', subject: body.subject, html: body.html, text: body.text || '', variables: [...new Set([...templateVariables(body.subject), ...templateVariables(body.html), ...templateVariables(body.text || '')])], createdAt: new Date().toISOString() };
       try {
         await client.send(new TransactWriteCommand({
           TransactItems: [
             { Put: { TableName, Item: template, ConditionExpression: 'attribute_not_exists(PK)' } },
-            { Put: { TableName, Item: { PK: key.project(projectId), SK: key.templateCurrent(body.slug), version, state: template.state }, ConditionExpression: 'attribute_not_exists(PK)' } },
+            { Put: { TableName, Item: { PK: key.project(projectId), SK: key.templateCurrent(body.slug), source: 'custom', version, state: template.state }, ConditionExpression: 'attribute_not_exists(PK)' } },
           ],
         }));
       } catch (error) {
