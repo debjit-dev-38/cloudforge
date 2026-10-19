@@ -485,6 +485,15 @@ function triggerLogout() {
   }
 }
 
+function updateDemoUi() {
+  const label = $('demo-toggle-label');
+  const button = $('demo-toggle-btn');
+  if (!label || !button) return;
+  label.textContent = `Demo Data: ${isDemoMode ? 'ON' : 'OFF'}`;
+  button.classList.toggle('btn-primary', isDemoMode);
+  button.classList.toggle('btn-secondary', !isDemoMode);
+}
+
 function updateAuthUi() {
   const signedIn = Boolean(accessToken());
   const hasKey = Boolean(storedApiKey());
@@ -500,15 +509,6 @@ function updateAuthUi() {
       : 'Not signed in. Log in to create projects, templates, and API keys.';
     $('settings-login-btn').classList.toggle('hidden', signedIn);
     $('settings-logout-btn').classList.toggle('hidden', !signedIn);
-  }
-
-  function updateDemoUi() {
-    const label = $('demo-toggle-label');
-    const button = $('demo-toggle-btn');
-    if (!label || !button) return;
-    label.textContent = `Demo Data: ${isDemoMode ? 'ON' : 'OFF'}`;
-    button.classList.toggle('btn-primary', isDemoMode);
-    button.classList.toggle('btn-secondary', !isDemoMode);
   }
 
   if ($('key-session-status')) {

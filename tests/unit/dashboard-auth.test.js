@@ -29,5 +29,7 @@ test('production dashboard starts with demo data off and synchronizes its toggle
   ]);
   assert.match(html, /id="demo-toggle-label">Demo Data: OFF</);
   assert.match(source, /function updateDemoUi\(\)/);
+  assert.match(source, /function updateDemoUi\(\)[\s\S]*?function updateAuthUi\(\)/);
+  assert.doesNotMatch(source, /function updateAuthUi\(\)[\s\S]*?function updateDemoUi\(\)/);
   assert.match(source, /updateDemoUi\(\);\s*toast\(`Demo Mode/);
 });
