@@ -167,7 +167,7 @@ test('overview campaign metrics use the selected project key and fail visibly on
   assert.match(app, /apiKeyProjectId && apiKeyProjectId !== projectId/);
   assert.match(app, /The campaign list response was invalid/);
   assert.match(app, /c\.projectId === projectId/);
-  assert.match(app, /\['queued','running','paused'\]\.includes\(c\.state\)/);
+  assert.match(app, /ACTIVE_CAMPAIGN_STATES = new Set\(\['scheduled', 'queued', 'running', 'paused'\]\)/);
 });
 
 test('overview exposes total and completed campaign metrics without changing active status rules', async () => {
@@ -178,7 +178,8 @@ test('overview exposes total and completed campaign metrics without changing act
   assert.match(app, /const completed = campaigns\.filter\(c => c\.state === 'completed'\)/);
   assert.match(app, /Number\(c\.successful\)/);
   assert.match(app, /Number\(c\.failed\)/);
-  assert.match(app, /active = campaigns\.filter\(c => \['queued','running','paused'\]\.includes\(c\.state\)\)/);
+  assert.match(app, /active = campaigns\.filter\(isActiveCampaign\)/);
+  assert.match(app, /campaign\.state === 'scheduled' && campaign\.scheduledAt/);
 });
 
 test('authorized project listing is Cognito-scoped and dashboard selection rejects stale projects', async () => {

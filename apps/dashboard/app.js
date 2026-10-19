@@ -573,6 +573,18 @@ function progressHtml(campaign) {
     </div>`;
 }
 
+const ACTIVE_CAMPAIGN_STATES = new Set(['scheduled', 'queued', 'running', 'paused']);
+
+function isActiveCampaign(campaign) {
+  return ACTIVE_CAMPAIGN_STATES.has(campaign.state);
+}
+
+function campaignTiming(campaign) {
+  return campaign.state === 'scheduled' && campaign.scheduledAt
+    ? `Starts ${fmtDate(campaign.scheduledAt)}`
+    : `${Number(campaign.total ?? 0).toLocaleString()} recipients`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Visualizations (Ember Studio SVG Charts)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -725,7 +737,7 @@ async function loadOverview() {
     renderOverviewNtfTable(notifications);
 
     // Active campaigns preview
-    const active = MOCK_DATA.campaigns.filter(c => ['queued','running','paused'].includes(c.state));
+    const active = MOCK_DATA.campaigns.filter(isActiveCampaign);
     const container = $('overview-campaigns-list');
     if (container) {
       container.innerHTML = active.slice(0, 4).map(c => {
@@ -737,7 +749,7 @@ async function loadOverview() {
               ${statusBadge(c.state)}
             </div>
             <div class="progress-wrap"><div class="progress-fill" style="width:${pct}%"></div></div>
-            <span class="text-sm text-muted">${pct}% · ${c.total.toLocaleString()} recipients</span>
+            <span class="text-sm text-muted">${c.state === 'scheduled' ? escHtml(campaignTiming(c)) : `${pct}% · ${c.total.toLocaleString()} recipients`}</span>
           </div>`;
       }).join('');
     }
@@ -829,7 +841,7 @@ async function loadOverviewCampaigns(hasKey) {
     const data = await apiKeyRequest('/v1/campaigns');
     if (!Array.isArray(data.items)) throw { error: 'The campaign list response was invalid.', status: 502, kind: 'http' };
     const campaigns = data.items.filter(c => !c.projectId || c.projectId === projectId);
-    const active = campaigns.filter(c => ['queued','running','paused'].includes(c.state));
+    const active = campaigns.filter(isActiveCampaign);
     const completed = campaigns.filter(c => c.state === 'completed');
     $('stat-campaigns').textContent = active.length.toLocaleString();
     $('stat-total-campaigns').textContent = campaigns.length.toLocaleString();
@@ -843,7 +855,7 @@ async function loadOverviewCampaigns(hasKey) {
             ${statusBadge(c.state)}
           </div>
           <div class="progress-wrap"><div class="progress-fill" style="width:${pct}%"></div></div>
-          <span class="text-sm text-muted">${pct}% · ${c.total.toLocaleString()} recipients</span>
+          <span class="text-sm text-muted">${c.state === 'scheduled' ? escHtml(campaignTiming(c)) : `${pct}% · ${c.total.toLocaleString()} recipients`}</span>
         </div>`;
     }).join('') : `<div class="state-empty" style="padding:16px 0;"><h3>No Active Campaigns</h3><p>All broadcasts have completed or none have been scheduled.</p></div>`;
     completedContainer.innerHTML = completed.length ? completed.slice(0, 4).map(c => `

@@ -34,10 +34,12 @@ test('builds campaign queue messages with the exact campaign id', () => {
 });
 
 test('campaign state transitions for pause, resume, and cancel', () => {
-  const transitions = { pause: ['queued', 'running', 'paused'], resume: ['paused', 'queued'], cancel: ['queued', 'running', 'paused'] };
+  const transitions = { pause: ['scheduled', 'queued', 'running'], resume: ['paused'], cancel: ['scheduled', 'queued', 'running', 'paused'] };
+  assert.ok(transitions.pause.includes('scheduled'));
   assert.ok(transitions.pause.includes('running'));
-  assert.ok(transitions.pause.includes('queued'));
   assert.ok(transitions.resume.includes('paused'));
+  assert.equal(transitions.resume.includes('queued'), false);
+  assert.ok(transitions.cancel.includes('scheduled'));
   assert.ok(transitions.cancel.includes('running'));
   assert.ok(transitions.cancel.includes('paused'));
   assert.equal(transitions.resume.includes('running'), false);
