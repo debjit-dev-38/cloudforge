@@ -309,6 +309,11 @@ const friendlyError = (err) => {
   if (/rate limit/i.test(detail)) return 'The project rate limit was reached. Try again shortly.';
   if (/provider/i.test(detail)) return 'The delivery provider rejected the request. Check provider configuration.';
   if (/Missing template variable/i.test(detail)) return detail;
+  if (err?.status >= 500) {
+    return err?.requestId
+      ? `The server could not complete this request. Try again later. Request ID: ${err.requestId}`
+      : 'The server could not complete this request. Try again later.';
+  }
   if (/network|fetch|failed to fetch/i.test(String(err))) return 'Network or CORS error — check the API URL and browser connection details.';
   return detail;
 };

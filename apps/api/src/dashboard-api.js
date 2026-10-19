@@ -85,13 +85,14 @@ export async function handler(event) {
         const result = await client.send(new QueryCommand({
           TableName,
           KeyConditionExpression: 'PK = :pk',
-          FilterExpression: 'SK <> :meta',
-          ExpressionAttributeValues: { ':pk': key.project(projectId), ':meta': 'META' },
+          ExpressionAttributeValues: { ':pk': key.project(projectId) },
           ProjectionExpression: 'SK',
           Limit: 25,
           ExclusiveStartKey,
         }));
-        if ((result.Items || []).length) return respond(409, { error: 'Project has dependent resources and cannot be deleted.', code: 'PROJECT_HAS_DEPENDENCIES' });
+        if ((result.Items || []).some((item) => item.SK !== 'META')) {
+          return respond(409, { error: 'Project has dependent resources and cannot be deleted.', code: 'PROJECT_HAS_DEPENDENCIES' });
+        }
         ExclusiveStartKey = result.LastEvaluatedKey;
       } while (ExclusiveStartKey);
       await client.send(new DeleteCommand({
